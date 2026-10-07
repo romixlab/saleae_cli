@@ -1,0 +1,37 @@
+[package]
+name = "saleae_cli"
+version = "0.3.0"
+edition = "2024"
+description = "CLI and agent skill for Saleae logic analyzers via the headless Logic 2 automation server (gRPC)"
+authors = ["Roman Isaikin <roman@vhrd.tech>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/romixlab/saleae_cli"
+readme = "README.md"
+keywords = ["saleae", "logic-analyzer", "grpc", "cli", "embedded"]
+categories = ["command-line-utilities", "hardware-support", "development-tools::debugging"]
+rust-version = "1.88"
+
+[[bin]]
+name = "saleae"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4.6", features = ["derive", "env"] }
+clap_complete = { version = "4.6", features = ["unstable-dynamic"] }
+csv = "1.4"
+dirs = "6"
+prost = "0.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "process"] }
+tonic = { version = "0.14", default-features = false, features = ["codegen", "transport"] }
+tonic-prost = "0.14"
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[build-dependencies]
+protox = "0.9"
+sha2 = "0.10"
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+
+[dev-dependencies]
