@@ -6,6 +6,11 @@ every feature; IDs in parentheses refer to it.
 
 ## [Unreleased]
 
+### Docs
+
+- Skill: wire every channel as a twisted pair with its own ground, with a photo of such leads and the numbers
+  from the 9 Oct 2026 cross-check bench.
+
 ## [0.3.0] - 2026-10-07
 
 ### Added

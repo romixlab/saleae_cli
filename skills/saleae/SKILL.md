@@ -29,7 +29,12 @@ You cannot see the bench. Ask, in one message, only what you don't already know:
 - **Which bus, and which analyzer channel goes to which signal** (e.g. "ch0 = SDA, ch1 = SCL"; SPI: CLK, MOSI,
   MISO, CS; UART: which side's TX is on which channel). Channel numbers are printed on the probe harness, 0-based.
 - **Ground**: the analyzer's GND must be connected to the target's ground. Most "garbage" decodes are a missing
-  ground.
+  ground. **Wire every channel as a twisted pair with its own ground** (the channel's signal lead twisted with
+  its grey ground lead, or a black ground wire, grounded at both ends; photo:
+  [assets/twisted-pair-leads.jpg](assets/twisted-pair-leads.jpg)). One shared ground for several fast lines gives
+  crosstalk and ringing: on 9 Oct 2026 four loose lines with one GND made 132 false edges per run on a quiet line
+  and -0.7 V / +4.1 V ringing at 10 ns edges; twisted pairs took the Saleae to 0. Remind the user of this when
+  they describe loose wires.
 - **Logic voltage** (1.2 / 1.8 / 3.3 V, or 5 V): Logic Pro 8/16 take `-V 1.2|1.8|3.3` (use 3.3 for 5 V logic);
   Logic 8 has a fixed threshold, don't pass `-V`.
 - **Expected speed** (I2C 100/400 kHz, SPI clock, UART baud, CAN bit rate) and SPI mode if known.
