@@ -6,6 +6,8 @@ every feature; IDs in parentheses refer to it.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-10
+
 ### Changed
 
 - The library crate is `saleae_rs` (was `saleae_automation`, easy to mix up with Saleae's official Python
