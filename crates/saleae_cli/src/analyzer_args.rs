@@ -1,11 +1,11 @@
 //! Clap command line forms for the typed analyzer shorthands (SPI, I2C, Async Serial, CAN, LIN, 1-Wire) and the
-//! generic form for any other analyzer; turned into [`saleae_automation::analyzer::Protocol`] (and from there into a
-//! [`saleae_automation::analyzer::Spec`]) by [`Protocol::spec`].
+//! generic form for any other analyzer; turned into [`saleae_rs::analyzer::Protocol`] (and from there into a
+//! [`saleae_rs::analyzer::Spec`]) by [`Protocol::spec`].
 
 use crate::parse;
 use anyhow::Result;
 use clap::{Args, Subcommand, ValueEnum};
-use saleae_automation::analyzer;
+use saleae_rs::analyzer;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Protocol {
@@ -173,7 +173,7 @@ pub struct OtherArgs {
 }
 
 impl Protocol {
-    /// Turns the parsed CLI arguments into the lib's typed [`saleae_automation::analyzer::Protocol`].
+    /// Turns the parsed CLI arguments into the lib's typed [`saleae_rs::analyzer::Protocol`].
     pub fn to_lib(&self) -> Result<analyzer::Protocol> {
         let p = match self {
             Protocol::Spi(a) => analyzer::Protocol::Spi(analyzer::SpiOptions {

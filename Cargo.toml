@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/saleae_automation", "crates/saleae_cli", "crates/saleae_py"]
+members = ["crates/saleae_rs", "crates/saleae_cli", "crates/saleae_py"]
 
 [workspace.package]
 version = "0.4.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/romixlab/saleae_cli"
+repository = "https://github.com/romixlab/saleae_rs"
 rust-version = "1.88"
 authors = ["Roman Isaikin <roman@vhrd.tech>"]
 

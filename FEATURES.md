@@ -14,8 +14,8 @@ This file is the single source of truth for what saleae_cli does, what is broken
 
 ## Library (`LIB`)
 
-- 🧪 **LIB-1 Library-first split**: a Cargo workspace: `crates/saleae_automation` (the library: server
-  lifecycle, typed capture/analyzer/export calls and results, summaries; `saleae_automation::Error` via
+- 🧪 **LIB-1 Library-first split**: a Cargo workspace: `crates/saleae_rs` (the library: server
+  lifecycle, typed capture/analyzer/export calls and results, summaries; `saleae_rs::Error` via
   thiserror; not `saleae`, that crates.io name is someone else's older, unrelated package), `crates/saleae_cli`
   (the same `saleae` commands, flags, JSON and completions, on the library; CLI-6) and `crates/saleae_py`
   (PY-1).
@@ -99,20 +99,20 @@ This file is the single source of truth for what saleae_cli does, what is broken
 - ✅ **CLI-3 JSON output**: `--json` on every command, errors as `{"error": ...}` with exit code 1.
 - ✅ **CLI-4 State**: captures and analyzers the CLI opened are remembered per server process (`state.json`),
   shown by `saleae status`, used by exports and completion.
-- ✅ **CLI-5 Published crate**: `saleae_cli` on crates.io and github.com/romixlab/saleae_cli (MIT or Apache-2.0).
+- ✅ **CLI-5 Published crate**: `saleae_cli` on crates.io and github.com/romixlab/saleae_rs (MIT or Apache-2.0).
   The proto is not vendored: `build.rs` downloads Saleae's Apache-2.0 `saleae.proto` from the logic2-automation
   repo at a pinned commit (v1.0.11) with a pinned SHA-256 (system `curl`); `SALEAE_PROTO_DIR` for offline builds
   or a newer proto; `DOCS_RS` builds a stub (no network on docs.rs). `cargo package` verified.
 - 🧪 **CLI-6 Thin CLI over the library**: `crates/saleae_cli` keeps the same commands, flags, JSON output and
-  completions, now as a thin layer (clap parsing, text/JSON formatting) over `crates/saleae_automation`
-  (LIB-1); `anyhow` only here, the library's `saleae_automation::Error` everywhere else.
+  completions, now as a thin layer (clap parsing, text/JSON formatting) over `crates/saleae_rs`
+  (LIB-1); `anyhow` only here, the library's `saleae_rs::Error` everywhere else.
 
 ## Python (`PY`)
 
-- 🧪 **PY-1 Python module `saleae_automation`**: `crates/saleae_py` (PyPI name `saleae-automation`; not
+- 🧪 **PY-1 Python module `saleae_rs`**: `crates/saleae_py` (PyPI name `saleae-rs`; not
   `saleae`, same name clash as LIB-1), PyO3 (abi3, Python >= 3.9) built with maturin:
   `Session` (devices, capture, add_analyzer/remove_analyzer via a settings dict, summarize, save/load/close),
-  module functions `install()`/`stop()`, exceptions under `SaleaeError` mapped from `saleae_automation::Error`.
+  module functions `install()`/`stop()`, exceptions under `SaleaeError` mapped from `saleae_rs::Error`.
   The typed
   SPI/I2C/... shorthands the CLI has are not wrapped yet; analyzers go through the generic settings-dict path
   (`OtherOptions`). Type stubs (`saleae.pyi`) ship in the wheel. `just test-py` builds it in a venv under /tmp

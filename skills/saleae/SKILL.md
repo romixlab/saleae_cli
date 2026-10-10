@@ -5,7 +5,7 @@ description: Debug digital buses (I2C, SPI, UART, CAN, LIN, 1-Wire, ...) with a 
 
 # Saleae logic analyzer debugging
 
-The `saleae` CLI (`cargo install saleae_cli`; source: https://github.com/romixlab/saleae_cli) drives Saleae
+The `saleae` CLI (`cargo install saleae_cli`; source: https://github.com/romixlab/saleae_rs) drives Saleae
 Logic 8 / Pro 8 / Pro 16 through Saleae's headless automation server. No GUI is needed. The server keeps captures in memory and starts in
 the background on the first command; `saleae server stop` ends it when you are done.
 

@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 # "saleae" (PyPI and crates.io) is someone else's older, unrelated package (legacy Logic 1 socket API); this
 # one wraps the modern gRPC automation API, hence the different name.
-name = "saleae-automation"
+name = "saleae-rs"
 description = "Saleae logic analyzers over the headless Logic 2 automation server (gRPC)"
 requires-python = ">=3.9"
 license = "MIT OR Apache-2.0"
@@ -19,7 +19,7 @@ dynamic = ["version"]
 dev = ["pytest>=8"]
 
 [tool.maturin]
-module-name = "saleae_automation"
+module-name = "saleae_rs"
 
 [tool.uv]
 # Rebuild the package when any rust files change

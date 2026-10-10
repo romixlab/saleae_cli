@@ -2,8 +2,8 @@
 //! setting values.
 
 use anyhow::{Context, Result, bail};
-use saleae_automation::pb::AnalyzerSettingValue;
-use saleae_automation::pb::analyzer_setting_value::Value;
+use saleae_rs::pb::AnalyzerSettingValue;
+use saleae_rs::pb::analyzer_setting_value::Value;
 
 /// Seconds from `1.5`, `250ms`, `10us`, `100ns`, `2s` or `1m` (minutes).
 pub fn duration(s: &str) -> Result<f64> {

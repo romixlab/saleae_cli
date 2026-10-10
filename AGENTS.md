@@ -37,12 +37,12 @@ IDs per area (`LIB`, `SRV`, `CAP`, `ANA`, `EXP`, `DEC`, `CLI`, `PY`, `SKILL`).
 Cargo workspace, edition 2024, one version for all crates (`[workspace.package]`), the same layout as the other
 instrument tools (tpm CLAUDE.md "Code repos": tools are a library first):
 
-- `crates/saleae_automation` — the library, the typed API; everything that talks gRPC lives here (not `saleae`:
+- `crates/saleae_rs` — the library, the typed API; everything that talks gRPC lives here (not `saleae`:
   that crates.io name is someone else's older, unrelated package, the legacy Logic 1 socket API). Errors are
-  `saleae_automation::Error` (thiserror), never `anyhow`.
+  `saleae_rs::Error` (thiserror), never `anyhow`.
   - `build.rs` — downloads Saleae's `saleae.proto` (Apache-2.0, from the `saleae/logic2-automation` GitHub repo
     at a pinned commit, checked against a pinned SHA-256, system `curl`) into `OUT_DIR` and compiles it with
-    `protox` (pure Rust, no `protoc`) into a tonic client (`saleae_automation::pb`). `SALEAE_PROTO_DIR=DIR` uses
+    `protox` (pure Rust, no `protoc`) into a tonic client (`saleae_rs::pb`). `SALEAE_PROTO_DIR=DIR` uses
     `DIR/saleae/grpc/saleae.proto` instead (offline; or the API 1.2 proto from the server zip for MSO work);
     `DOCS_RS` builds the crate with no modules (`cfg(saleae_stub_proto)`) since docs.rs has no network. Nothing
     of Saleae's is committed; the published proto is API 1.0.0, so API 1.2 things (Logic MSO, `SetReporting`)
@@ -66,12 +66,12 @@ instrument tools (tpm CLAUDE.md "Code repos": tools are a library first):
   `src/complete.rs` dynamic shell completion, its Bash adapter copied from `wire_weaver_cli` (keep in sync);
   `build.rs` `GIT_SHA` and `BUILD_TIME` for `--version` (its own `DOCS_RS` stub cfg, `saleae_cli_stub`, since
   build-script cfgs don't cross crates). `anyhow` only here.
-- `crates/saleae_py` — the `saleae_automation` Python module (also not `saleae`: PyPI has the same name clash),
+- `crates/saleae_py` — the `saleae_rs` Python module (also not `saleae`: PyPI has the same name clash),
   PyO3, abi3 for Python >= 3.9, built by maturin from `pyproject.toml`; `publish = false` on crates.io, it ships
   as a wheel: `Session` (devices, capture, add_analyzer/remove_analyzer with a settings dict, summarize,
   save/load/close), module functions `install()` / `stop()`, exceptions under `SaleaeError` mapped from
-  `saleae_automation::Error`. The typed SPI/I2C/... shorthands the CLI has are not wrapped yet (CLI-6); analyzers
-  go through the generic settings-dict path. `saleae_automation.pyi` (type stubs and docstrings, shipped by
+  `saleae_rs::Error`. The typed SPI/I2C/... shorthands the CLI has are not wrapped yet (CLI-6); analyzers
+  go through the generic settings-dict path. `saleae_rs.pyi` (type stubs and docstrings, shipped by
   maturin) must match `src/lib.rs`; `tests/test_smoke.py` is the pytest smoke test.
 - `skills/saleae/SKILL.md` — the agent skill. Update it when commands or their output change.
 - `crates/saleae_cli/tests/sim.rs` — end to end against the server's simulated devices.
@@ -116,8 +116,8 @@ build deps (today: only `dirs-sys` and `linux-raw-sys`, both pure Rust).
 
 ## Publishing
 
-Crates `saleae_automation` (library) and `saleae_cli` (binary `saleae`) on crates.io, repo
-`github.com/romixlab/saleae_cli`. The Python wheel `saleae-automation` (module `saleae_automation`) from
+Crates `saleae_rs` (library) and `saleae_cli` (binary `saleae`) on crates.io, repo
+`github.com/romixlab/saleae_rs`. The Python wheel `saleae-rs` (module `saleae_rs`) from
 `crates/saleae_py` (maturin, abi3) is not published yet. `cargo package` must pass
 for both crates (it builds the packaged crate, so the proto download must work); `tpm land` bumps the version,
 the user runs `cargo publish` (library first, the CLI's path dependency needs the published version). Public
@@ -125,19 +125,19 @@ repo: nothing private in commits, docs or the skill (no internal hosts, paths, i
 
 ## Code conventions
 
-- Errors: `saleae_automation::Error` (thiserror) in the library, one variant per case a caller may tell apart
+- Errors: `saleae_rs::Error` (thiserror) in the library, one variant per case a caller may tell apart
   (not found, invalid input, an RPC failure with the server's own message, I/O, ...); `anyhow` with
   `.context(...)` only in the CLI; in Python each `Error` variant maps to a `SaleaeError` subclass (`to_py` in
   `saleae_py`). No `unwrap`/`expect` on data from the server or the user.
 - The CLI stays thin: new behaviour goes into the library first, then the CLI and the Python module call it.
 - Every command supports `--json`; keep text output short and line-oriented (agents read it).
-- Paths sent to the server must be absolute (`saleae_automation::export::abs`, used internally): the server runs
+- Paths sent to the server must be absolute (`saleae_rs::export::abs`, used internally): the server runs
   in its own working directory.
 
 ## Tests
 
 - Pure logic (parsing, analyzer settings, summaries): Rust unit tests next to the code, in the crate that owns
-  it (string parsing in `saleae_cli`, everything else in `saleae_automation`). A summary change gets a test with
+  it (string parsing in `saleae_cli`, everything else in `saleae_rs`). A summary change gets a test with
   a data table in Logic 2's CSV format.
 - Server behaviour: `crates/saleae_cli/tests/sim.rs` (own port and state dir).
 - The Python module: `crates/saleae_py/tests/test_smoke.py` (pytest, against the simulated devices; skips with a

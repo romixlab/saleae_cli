@@ -121,7 +121,7 @@ wheels = [
 ]
 
 [[package]]
-name = "saleae-automation"
+name = "saleae-rs"
 source = { editable = "." }
 
 [package.dev-dependencies]

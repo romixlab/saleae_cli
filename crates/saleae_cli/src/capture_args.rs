@@ -1,10 +1,10 @@
-//! Clap command line form for a capture, turned into [`saleae_automation::capture::CaptureOptions`] by [`CaptureArgs::options`].
+//! Clap command line form for a capture, turned into [`saleae_rs::capture::CaptureOptions`] by [`CaptureArgs::options`].
 
 use crate::{complete, parse};
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use clap_complete::ArgValueCandidates;
-use saleae_automation::capture::{CaptureOptions, Edge, LinkState, LinkedChannel, TriggerSpec};
+use saleae_rs::capture::{CaptureOptions, Edge, LinkState, LinkedChannel, TriggerSpec};
 
 #[derive(Args, Debug, Clone)]
 pub struct CaptureArgs {

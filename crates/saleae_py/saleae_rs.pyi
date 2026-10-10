@@ -1,7 +1,7 @@
 """Saleae logic analyzers over the headless Logic 2 automation server (gRPC).
 
-Typed stub for the `saleae_automation` extension module (see `README.md` in this directory for an example).
-Mirrors the `saleae_automation` Rust crate's typed API; the CLI (`saleae`, from the `saleae_cli` crate) covers
+Typed stub for the `saleae_rs` extension module (see `README.md` in this directory for an example).
+Mirrors the `saleae_rs` Rust crate's typed API; the CLI (`saleae`, from the `saleae_cli` crate) covers
 the same server, but adds shell completion and a few typed analyzer shorthands this binding does not have yet.
 """
 

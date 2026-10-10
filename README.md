@@ -5,9 +5,9 @@ Rust library, a CLI and agent skill on top, and a Python module for notebooks an
 
 | crate | what |
 |---|---|
-| [`crates/saleae_automation`](crates/saleae_automation) | the library: server lifecycle, typed capture/analyzer/export calls, summaries |
+| [`crates/saleae_rs`](crates/saleae_rs) | the library: server lifecycle, typed capture/analyzer/export calls, summaries |
 | [`crates/saleae_cli`](crates/saleae_cli) | the `saleae` command line tool |
-| [`crates/saleae_py`](crates/saleae_py) | the `saleae_automation` Python module (PyO3 + maturin) |
+| [`crates/saleae_py`](crates/saleae_py) | the `saleae_rs` Python module (PyO3 + maturin) |
 
 ```sh
 cargo install --path crates/saleae_cli     # or `cargo install saleae_cli` once published
@@ -31,7 +31,7 @@ uv add ./crates/saleae_py                  # or as a dependency of a uv project
 ```
 
 ```python
-import saleae_automation as saleae
+import saleae_rs as saleae
 
 s = saleae.Session(sim_only=True)                       # starts the server in the background on first use
 sim = next(d for d in s.devices() if d["simulated"])     # F4241 / F4244 / F4243 without real hardware
@@ -41,21 +41,21 @@ print(s.summarize(rec["capture"], analyzer, kind="i2c")["text"])
 s.close(rec["capture"])
 ```
 
-`saleae_automation` (not `saleae`: that PyPI name is someone else's older, unrelated package, the legacy Logic 1
+`saleae_rs` (not `saleae`: that PyPI name is someone else's older, unrelated package, the legacy Logic 1
 socket API). Errors are `SaleaeError` subclasses (`NotFoundError`, `InvalidInputError`, `RpcError`, ...); type
-stubs (`saleae_automation.pyi`) ship with the module. The typed SPI/I2C/... shorthands the CLI has are not
+stubs (`saleae_rs.pyi`) ship with the module. The typed SPI/I2C/... shorthands the CLI has are not
 wrapped yet; analyzers go through `add_analyzer`'s settings dict (setting names as Logic 2 shows them, `saleae
 analyzer list`).
 
 ## Rust
 
 ```rust
-let conn = saleae_automation::server::Conn::default();
+let conn = saleae_rs::server::Conn::default();
 let mut session = conn.session(None).await?;             // starts the server in the background on first use
-let devices = saleae_automation::device::list(&mut session, false).await?;
+let devices = saleae_rs::device::list(&mut session, false).await?;
 ```
 
-(the crate is `saleae_automation`, not `saleae`: that crates.io name is the same older, unrelated package)
+(the crate is `saleae_rs`, not `saleae`: that crates.io name is the same older, unrelated package)
 
 - Agent skill: [skills/saleae/SKILL.md](skills/saleae/SKILL.md)
 - Features and status: [FEATURES.md](FEATURES.md); changes: [CHANGELOG.md](CHANGELOG.md); dev rules:

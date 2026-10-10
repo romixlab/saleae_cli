@@ -1,4 +1,4 @@
-//! Python bindings for the [`saleae_automation`] crate: a `Session` talks to the headless Logic 2 automation
+//! Python bindings for the [`saleae_rs`] crate: a `Session` talks to the headless Logic 2 automation
 //! server (gRPC),
 //! starting it in the background on first use (as the CLI does). Each call blocks on a runtime owned by the
 //! `Session`, so no `asyncio` is needed on the Python side.
@@ -12,31 +12,31 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::path::PathBuf;
 
-pyo3::create_exception!(saleae_automation, SaleaeError, PyException);
-pyo3::create_exception!(saleae_automation, NotFoundError, SaleaeError);
-pyo3::create_exception!(saleae_automation, InvalidInputError, SaleaeError);
-pyo3::create_exception!(saleae_automation, RpcError, SaleaeError);
-pyo3::create_exception!(saleae_automation, ServerError, SaleaeError);
-pyo3::create_exception!(saleae_automation, IoError, SaleaeError);
+pyo3::create_exception!(saleae_rs, SaleaeError, PyException);
+pyo3::create_exception!(saleae_rs, NotFoundError, SaleaeError);
+pyo3::create_exception!(saleae_rs, InvalidInputError, SaleaeError);
+pyo3::create_exception!(saleae_rs, RpcError, SaleaeError);
+pyo3::create_exception!(saleae_rs, ServerError, SaleaeError);
+pyo3::create_exception!(saleae_rs, IoError, SaleaeError);
 
-fn to_py(e: ::saleae_automation::Error) -> PyErr {
+fn to_py(e: ::saleae_rs::Error) -> PyErr {
     match e {
-        ::saleae_automation::Error::NotFound(m) => NotFoundError::new_err(m),
-        ::saleae_automation::Error::InvalidInput(m) => InvalidInputError::new_err(m),
-        ::saleae_automation::Error::Rpc { code, message } => {
+        ::saleae_rs::Error::NotFound(m) => NotFoundError::new_err(m),
+        ::saleae_rs::Error::InvalidInput(m) => InvalidInputError::new_err(m),
+        ::saleae_rs::Error::Rpc { code, message } => {
             RpcError::new_err(format!("{message} ({code:?})"))
         }
-        ::saleae_automation::Error::Server(m) => ServerError::new_err(m),
-        ::saleae_automation::Error::Io(e) => IoError::new_err(e.to_string()),
-        ::saleae_automation::Error::Json(e) => SaleaeError::new_err(e.to_string()),
-        ::saleae_automation::Error::Transport(e) => ServerError::new_err(e.to_string()),
+        ::saleae_rs::Error::Server(m) => ServerError::new_err(m),
+        ::saleae_rs::Error::Io(e) => IoError::new_err(e.to_string()),
+        ::saleae_rs::Error::Json(e) => SaleaeError::new_err(e.to_string()),
+        ::saleae_rs::Error::Transport(e) => ServerError::new_err(e.to_string()),
     }
 }
 
 /// A setting value from a Python dict: `int`, `bool`, `float` or `str` (the option text as shown in Logic 2).
-fn setting_value(v: &Bound<'_, PyAny>) -> PyResult<::saleae_automation::pb::AnalyzerSettingValue> {
-    use ::saleae_automation::pb::AnalyzerSettingValue;
-    use ::saleae_automation::pb::analyzer_setting_value::Value;
+fn setting_value(v: &Bound<'_, PyAny>) -> PyResult<::saleae_rs::pb::AnalyzerSettingValue> {
+    use ::saleae_rs::pb::AnalyzerSettingValue;
+    use ::saleae_rs::pb::analyzer_setting_value::Value;
     let value = if let Ok(b) = v.extract::<bool>() {
         Value::BoolValue(b)
     } else if let Ok(i) = v.extract::<i64>() {
@@ -53,10 +53,8 @@ fn setting_value(v: &Bound<'_, PyAny>) -> PyResult<::saleae_automation::pb::Anal
     Ok(AnalyzerSettingValue { value: Some(value) })
 }
 
-fn settings_from_dict(
-    d: Option<&Bound<'_, PyDict>>,
-) -> PyResult<::saleae_automation::analyzer::Overrides> {
-    let mut out = ::saleae_automation::analyzer::Overrides::new();
+fn settings_from_dict(d: Option<&Bound<'_, PyDict>>) -> PyResult<::saleae_rs::analyzer::Overrides> {
+    let mut out = ::saleae_rs::analyzer::Overrides::new();
     if let Some(d) = d {
         for (k, v) in d.iter() {
             out.insert(k.extract::<String>()?, setting_value(&v)?);
@@ -70,7 +68,7 @@ fn settings_from_dict(
 #[pyclass]
 struct Session {
     rt: tokio::runtime::Runtime,
-    inner: ::saleae_automation::server::Session,
+    inner: ::saleae_rs::server::Session,
 }
 
 #[pymethods]
@@ -89,8 +87,8 @@ impl Session {
             .enable_all()
             .build()
             .map_err(|e| ServerError::new_err(e.to_string()))?;
-        let conn = ::saleae_automation::server::Conn {
-            addr: addr.unwrap_or_else(|| ::saleae_automation::server::DEFAULT_ADDR.to_string()),
+        let conn = ::saleae_rs::server::Conn {
+            addr: addr.unwrap_or_else(|| ::saleae_rs::server::DEFAULT_ADDR.to_string()),
             no_launch,
             server_bin,
             no_usb: sim_only,
@@ -116,10 +114,7 @@ impl Session {
     fn devices(&mut self, py: Python<'_>, real_only: bool) -> PyResult<Vec<Py<PyAny>>> {
         let devices = self
             .rt
-            .block_on(::saleae_automation::device::list(
-                &mut self.inner,
-                real_only,
-            ))
+            .block_on(::saleae_rs::device::list(&mut self.inner, real_only))
             .map_err(to_py)?;
         devices
             .into_iter()
@@ -150,7 +145,7 @@ impl Session {
         duration: f64,
         buffer_mb: u32,
     ) -> PyResult<Py<PyAny>> {
-        let opts = ::saleae_automation::capture::CaptureOptions {
+        let opts = ::saleae_rs::capture::CaptureOptions {
             device,
             digital: digital.unwrap_or_default(),
             analog: analog.unwrap_or_default(),
@@ -165,11 +160,7 @@ impl Session {
         };
         let (rec, end) = self
             .rt
-            .block_on(::saleae_automation::capture::run(
-                &mut self.inner,
-                &opts,
-                &[],
-            ))
+            .block_on(::saleae_rs::capture::run(&mut self.inner, &opts, &[]))
             .map_err(to_py)?;
         let dict = PyDict::new(py);
         dict.set_item("capture", rec.id)?;
@@ -177,7 +168,7 @@ impl Session {
         dict.set_item("desc", rec.desc)?;
         dict.set_item(
             "end",
-            matches!(end, ::saleae_automation::capture::End::TriggerTimeout)
+            matches!(end, ::saleae_rs::capture::End::TriggerTimeout)
                 .then_some("trigger_timeout")
                 .unwrap_or("completed"),
         )?;
@@ -195,18 +186,16 @@ impl Session {
         channels: Option<Vec<u32>>,
         label: Option<String>,
     ) -> PyResult<u64> {
-        let spec = ::saleae_automation::analyzer::Protocol::Other(
-            ::saleae_automation::analyzer::OtherOptions {
-                name,
-                channels: channels.unwrap_or_default(),
-                overrides: settings_from_dict(settings)?,
-            },
-        )
+        let spec = ::saleae_rs::analyzer::Protocol::Other(::saleae_rs::analyzer::OtherOptions {
+            name,
+            channels: channels.unwrap_or_default(),
+            overrides: settings_from_dict(settings)?,
+        })
         .spec()
         .map_err(to_py)?;
         let rec = self
             .rt
-            .block_on(::saleae_automation::analyzer::add(
+            .block_on(::saleae_rs::analyzer::add(
                 &mut self.inner,
                 capture,
                 &spec,
@@ -219,7 +208,7 @@ impl Session {
     /// Removes an analyzer from a capture.
     fn remove_analyzer(&mut self, capture: u64, analyzer: u64) -> PyResult<()> {
         self.rt
-            .block_on(::saleae_automation::analyzer::remove(
+            .block_on(::saleae_rs::analyzer::remove(
                 &mut self.inner,
                 capture,
                 analyzer,
@@ -244,11 +233,11 @@ impl Session {
         miso: bool,
     ) -> PyResult<Py<PyAny>> {
         let kind = match kind {
-            "i2c" => ::saleae_automation::analyzer::Kind::I2c,
-            "spi" => ::saleae_automation::analyzer::Kind::Spi { mosi, miso },
-            "serial" => ::saleae_automation::analyzer::Kind::Serial,
-            "can" => ::saleae_automation::analyzer::Kind::Can,
-            "other" => ::saleae_automation::analyzer::Kind::Other,
+            "i2c" => ::saleae_rs::analyzer::Kind::I2c,
+            "spi" => ::saleae_rs::analyzer::Kind::Spi { mosi, miso },
+            "serial" => ::saleae_rs::analyzer::Kind::Serial,
+            "can" => ::saleae_rs::analyzer::Kind::Can,
+            "other" => ::saleae_rs::analyzer::Kind::Other,
             other => {
                 return Err(InvalidInputError::new_err(format!(
                     "kind `{other}` is not i2c, spi, serial, can or other"
@@ -257,7 +246,7 @@ impl Session {
         };
         let summary = self
             .rt
-            .block_on(::saleae_automation::decode::summarize_analyzer(
+            .block_on(::saleae_rs::decode::summarize_analyzer(
                 &mut self.inner,
                 capture,
                 analyzer,
@@ -275,28 +264,21 @@ impl Session {
     /// Saves a capture as a `.sal` file (opens in Logic 2).
     fn save(&mut self, capture: u64, file: PathBuf) -> PyResult<()> {
         self.rt
-            .block_on(::saleae_automation::capture::save(
-                &mut self.inner,
-                capture,
-                &file,
-            ))
+            .block_on(::saleae_rs::capture::save(&mut self.inner, capture, &file))
             .map_err(to_py)
     }
 
     /// Loads a `.sal` capture file into the server; returns its capture id.
     fn load(&mut self, file: PathBuf) -> PyResult<u64> {
         self.rt
-            .block_on(::saleae_automation::capture::load(&mut self.inner, &file))
+            .block_on(::saleae_rs::capture::load(&mut self.inner, &file))
             .map_err(to_py)
     }
 
     /// Stops (if still running) and closes a capture, freeing its memory in the server.
     fn close(&mut self, capture: u64) -> PyResult<()> {
         self.rt
-            .block_on(::saleae_automation::capture::close(
-                &mut self.inner,
-                capture,
-            ))
+            .block_on(::saleae_rs::capture::close(&mut self.inner, capture))
             .map_err(to_py)
     }
 }
@@ -344,24 +326,24 @@ fn pythonize(py: Python<'_>, v: &serde_json::Value) -> PyResult<Py<PyAny>> {
 fn install(build: Option<String>, url: Option<String>, zip: Option<PathBuf>) -> PyResult<PathBuf> {
     let url = match url {
         Some(u) => u,
-        None => ::saleae_automation::server::download_url(
+        None => ::saleae_rs::server::download_url(
             build
                 .as_deref()
-                .unwrap_or(::saleae_automation::server::DEFAULT_BUILD),
+                .unwrap_or(::saleae_rs::server::DEFAULT_BUILD),
         )
         .map_err(to_py)?,
     };
-    ::saleae_automation::server::install(&url, zip.as_deref(), None).map_err(to_py)
+    ::saleae_rs::server::install(&url, zip.as_deref(), None).map_err(to_py)
 }
 
 /// Ends the server with the given pid, after checking that it is the automation server.
 #[pyfunction]
 fn stop(pid: u64) -> PyResult<()> {
-    ::saleae_automation::server::kill(pid).map_err(to_py)
+    ::saleae_rs::server::kill(pid).map_err(to_py)
 }
 
 #[pymodule]
-fn saleae_automation(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn saleae_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Session>()?;
     m.add_function(wrap_pyfunction!(install, m)?)?;
     m.add_function(wrap_pyfunction!(stop, m)?)?;
@@ -371,6 +353,6 @@ fn saleae_automation(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("RpcError", m.py().get_type::<RpcError>())?;
     m.add("ServerError", m.py().get_type::<ServerError>())?;
     m.add("IoError", m.py().get_type::<IoError>())?;
-    m.add("DEFAULT_ADDR", ::saleae_automation::server::DEFAULT_ADDR)?;
+    m.add("DEFAULT_ADDR", ::saleae_rs::server::DEFAULT_ADDR)?;
     Ok(())
 }

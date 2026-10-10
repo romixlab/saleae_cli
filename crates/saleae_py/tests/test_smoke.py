@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import saleae_automation as saleae
+import saleae_rs as saleae
 
 
 def _free_port() -> int:

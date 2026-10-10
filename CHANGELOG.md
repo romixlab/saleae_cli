@@ -6,6 +6,12 @@ every feature; IDs in parentheses refer to it.
 
 ## [Unreleased]
 
+### Changed
+
+- The library crate is `saleae_rs` (was `saleae_automation`, easy to mix up with Saleae's official Python
+  `saleae.automation` from logic2-automation); the Python package is `saleae-rs` (`import saleae_rs`); the repo is
+  github.com/romixlab/saleae_rs (was saleae_cli). The `saleae` binary and its crate `saleae_cli` keep their names.
+
 ## [0.4.0] - 2026-10-10
 
 ### Added

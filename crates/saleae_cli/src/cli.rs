@@ -6,8 +6,8 @@ use crate::{complete, parse};
 use anyhow::{Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::ArgValueCandidates;
-use saleae_automation::capture::End;
-use saleae_automation::server::Conn;
+use saleae_rs::capture::End;
+use saleae_rs::server::Conn;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -30,7 +30,7 @@ The server keeps captures in memory, so the CLI starts it in the background on f
 Shell completion: `source <(COMPLETE=bash saleae)` (or zsh, fish).")]
 struct Cli {
     /// Automation server address.
-    #[arg(long, global = true, env = "SALEAE_ADDR", default_value = saleae_automation::server::DEFAULT_ADDR)]
+    #[arg(long, global = true, env = "SALEAE_ADDR", default_value = saleae_rs::server::DEFAULT_ADDR)]
     addr: String,
     /// Machine-readable JSON on stdout.
     #[arg(long, global = true)]
@@ -137,7 +137,7 @@ enum ServerCmd {
     /// Download the server for this platform and unpack it into the CLI data dir.
     Install {
         /// Release build id from the Saleae forum post (part of the download URL).
-        #[arg(long, default_value = saleae_automation::server::DEFAULT_BUILD)]
+        #[arg(long, default_value = saleae_rs::server::DEFAULT_BUILD)]
         build: String,
         /// Full download URL instead of --build.
         #[arg(long)]
@@ -240,13 +240,13 @@ pub enum Radix {
     Ascii,
 }
 
-impl From<Radix> for saleae_automation::export::Radix {
+impl From<Radix> for saleae_rs::export::Radix {
     fn from(r: Radix) -> Self {
         match r {
-            Radix::Hex => saleae_automation::export::Radix::Hex,
-            Radix::Dec => saleae_automation::export::Radix::Dec,
-            Radix::Bin => saleae_automation::export::Radix::Bin,
-            Radix::Ascii => saleae_automation::export::Radix::Ascii,
+            Radix::Hex => saleae_rs::export::Radix::Hex,
+            Radix::Dec => saleae_rs::export::Radix::Dec,
+            Radix::Bin => saleae_rs::export::Radix::Bin,
+            Radix::Ascii => saleae_rs::export::Radix::Ascii,
         }
     }
 }
@@ -309,7 +309,7 @@ async fn run(cli: Cli) -> Result<()> {
         Cmd::Server(c) => server_cmd(&conn, &out, c).await,
         Cmd::Devices { real } => {
             let mut s = conn.session(Some(&progress)).await?;
-            let devices = saleae_automation::device::list(&mut s, real).await?;
+            let devices = saleae_rs::device::list(&mut s, real).await?;
             let mut text = String::new();
             let mut list = vec![];
             for d in &devices {
@@ -331,7 +331,7 @@ async fn run(cli: Cli) -> Result<()> {
                 );
                 return Ok(());
             };
-            let state = saleae_automation::server::State::load(&conn.addr, pid);
+            let state = saleae_rs::server::State::load(&conn.addr, pid);
             let mut text = format!("server {version} at {} (pid {pid})\n", conn.addr);
             for c in &state.captures {
                 text += &format!("capture {}  {}  {}\n", c.id, c.device, c.desc);
@@ -357,7 +357,7 @@ async fn run(cli: Cli) -> Result<()> {
         } => {
             let opts = capture.options()?;
             let mut s = conn.session(Some(&progress)).await?;
-            let (rec, end) = saleae_automation::capture::run(&mut s, &opts, &[]).await?;
+            let (rec, end) = saleae_rs::capture::run(&mut s, &opts, &[]).await?;
             let mut text = format!("capture {}  {}  {}", rec.id, rec.device, rec.desc);
             if end == End::TriggerTimeout {
                 text += "\ntrigger not seen within the timeout; capture stopped and kept";
@@ -365,18 +365,17 @@ async fn run(cli: Cli) -> Result<()> {
             let mut v =
                 json!({ "capture": rec.id, "device": rec.device, "desc": rec.desc, "end": end });
             if let Some(dir) = export_raw {
-                saleae_automation::export::raw(&mut s, rec.id, &dir, None, None, 1, false, false)
-                    .await?;
+                saleae_rs::export::raw(&mut s, rec.id, &dir, None, None, 1, false, false).await?;
                 text += &format!("\nraw data in {}", dir.display());
                 v["raw_dir"] = json!(dir);
             }
             if let Some(file) = save {
-                saleae_automation::capture::save(&mut s, rec.id, &file).await?;
+                saleae_rs::capture::save(&mut s, rec.id, &file).await?;
                 text += &format!("\nsaved {}", file.display());
                 v["saved"] = json!(file);
             }
             if close {
-                saleae_automation::capture::close(&mut s, rec.id).await?;
+                saleae_rs::capture::close(&mut s, rec.id).await?;
                 text += "\nclosed";
             }
             out.print(text, v);
@@ -384,7 +383,7 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Load { file } => {
             let mut s = conn.session(Some(&progress)).await?;
-            let id = saleae_automation::capture::load(&mut s, &file).await?;
+            let id = saleae_rs::capture::load(&mut s, &file).await?;
             out.print(
                 format!("capture {id}  loaded {}", file.display()),
                 json!({ "capture": id }),
@@ -393,7 +392,7 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Save { capture, file } => {
             let mut s = conn.session(Some(&progress)).await?;
-            saleae_automation::capture::save(&mut s, capture, &file).await?;
+            saleae_rs::capture::save(&mut s, capture, &file).await?;
             out.print(
                 format!("saved {}", file.display()),
                 json!({ "saved": file }),
@@ -402,7 +401,7 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Cmd::Close { capture } => {
             let mut s = conn.session(Some(&progress)).await?;
-            saleae_automation::capture::close(&mut s, capture).await?;
+            saleae_rs::capture::close(&mut s, capture).await?;
             out.print(
                 format!("closed capture {capture}"),
                 json!({ "closed": capture }),
@@ -422,7 +421,7 @@ async fn run(cli: Cli) -> Result<()> {
             let spec = proto.spec()?;
             let opts = capture.options()?;
             let mut s = conn.session(Some(&progress)).await?;
-            let outcome = saleae_automation::decode::decode(
+            let outcome = saleae_rs::decode::decode(
                 &mut s,
                 &opts,
                 &proto,
@@ -455,7 +454,7 @@ async fn run(cli: Cli) -> Result<()> {
             v["settings"] = spec
                 .settings
                 .iter()
-                .map(|(k, val)| (k.clone(), saleae_automation::analyzer::setting_json(val)))
+                .map(|(k, val)| (k.clone(), saleae_rs::analyzer::setting_json(val)))
                 .collect::<serde_json::Map<_, _>>()
                 .into();
             let mut text = summary.text();
@@ -482,9 +481,9 @@ async fn run(cli: Cli) -> Result<()> {
                 .state
                 .capture(capture)
                 .and_then(|c| c.analyzers.iter().find(|a| a.id == analyzer))
-                .map(|a| saleae_automation::analyzer::kind_of(&a.name))
-                .unwrap_or(saleae_automation::analyzer::Kind::Other);
-            let mut summary = saleae_automation::decode::summarize_analyzer(
+                .map(|a| saleae_rs::analyzer::kind_of(&a.name))
+                .unwrap_or(saleae_rs::analyzer::Kind::Other);
+            let mut summary = saleae_rs::decode::summarize_analyzer(
                 &mut s,
                 capture,
                 analyzer,
@@ -505,9 +504,9 @@ async fn server_cmd(conn: &Conn, out: &Out, c: ServerCmd) -> Result<()> {
         ServerCmd::Install { build, url, zip } => {
             let url = match url {
                 Some(u) => u,
-                None => saleae_automation::server::download_url(&build)?,
+                None => saleae_rs::server::download_url(&build)?,
             };
-            let bin = saleae_automation::server::install(&url, zip.as_deref(), Some(&progress))?;
+            let bin = saleae_rs::server::install(&url, zip.as_deref(), Some(&progress))?;
             let mut text = format!("installed {}\n", bin.display());
             if cfg!(target_os = "linux") {
                 let rules = bin.with_file_name("99-SaleaeLogic.rules");
@@ -548,7 +547,7 @@ async fn server_cmd(conn: &Conn, out: &Out, c: ServerCmd) -> Result<()> {
                 json!({ "stopped": false }),
             ),
             Some((_, pid, _)) => {
-                saleae_automation::server::kill(pid)?;
+                saleae_rs::server::kill(pid)?;
                 // it shuts down cleanly (closes USB), which takes a moment
                 let deadline = std::time::Instant::now() + Duration::from_secs(10);
                 while conn.probe().await.is_some() {
@@ -574,7 +573,7 @@ async fn server_cmd(conn: &Conn, out: &Out, c: ServerCmd) -> Result<()> {
             ),
         },
         ServerCmd::Path => {
-            let bin = saleae_automation::server::locate(conn.server_bin.as_deref())?;
+            let bin = saleae_rs::server::locate(conn.server_bin.as_deref())?;
             out.print(bin.display().to_string(), json!({ "path": bin }));
         }
     }
@@ -590,7 +589,7 @@ async fn analyzer_cmd(conn: &Conn, out: &Out, c: AnalyzerCmd) -> Result<()> {
         } => {
             let spec = protocol.spec()?;
             let mut s = conn.session(Some(&progress)).await?;
-            let a = saleae_automation::analyzer::add(&mut s, capture, &spec, label).await?;
+            let a = saleae_rs::analyzer::add(&mut s, capture, &spec, label).await?;
             out.print(
                 format!("analyzer {}  {} on capture {capture}", a.id, a.label),
                 json!({ "analyzer": a.id, "capture": capture, "name": a.name, "label": a.label }),
@@ -598,7 +597,7 @@ async fn analyzer_cmd(conn: &Conn, out: &Out, c: AnalyzerCmd) -> Result<()> {
         }
         AnalyzerCmd::Remove { capture, analyzer } => {
             let mut s = conn.session(Some(&progress)).await?;
-            saleae_automation::analyzer::remove(&mut s, capture, analyzer).await?;
+            saleae_rs::analyzer::remove(&mut s, capture, analyzer).await?;
             out.print(
                 format!("removed analyzer {analyzer}"),
                 json!({ "removed": analyzer }),
@@ -608,12 +607,9 @@ async fn analyzer_cmd(conn: &Conn, out: &Out, c: AnalyzerCmd) -> Result<()> {
             let text = format!(
                 "{}\n\nShorthands with typed flags: spi, i2c, serial (uart), can, lin, onewire; any other: \
                  `analyzer add other NAME --set KEY=VALUE` with the setting names Logic 2 shows.",
-                saleae_automation::analyzer::BUNDLED.join("\n")
+                saleae_rs::analyzer::BUNDLED.join("\n")
             );
-            out.print(
-                text,
-                json!({ "analyzers": saleae_automation::analyzer::BUNDLED }),
-            );
+            out.print(text, json!({ "analyzers": saleae_rs::analyzer::BUNDLED }));
         }
     }
     Ok(())
@@ -631,7 +627,7 @@ async fn export_cmd(conn: &Conn, out: &Out, c: ExportCmd) -> Result<()> {
             binary,
             iso,
         } => {
-            saleae_automation::export::raw(
+            saleae_rs::export::raw(
                 &mut s,
                 capture,
                 &dir,
@@ -675,7 +671,7 @@ async fn export_cmd(conn: &Conn, out: &Out, c: ExportCmd) -> Result<()> {
             if ids.is_empty() {
                 bail!("no analyzers: pass --analyzer ID (see `saleae status`)");
             }
-            saleae_automation::export::table(
+            saleae_rs::export::table(
                 &mut s,
                 capture,
                 &ids,

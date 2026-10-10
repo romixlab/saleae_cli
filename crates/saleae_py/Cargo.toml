@@ -6,18 +6,18 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 authors.workspace = true
-description = "Python bindings for saleae_automation: Saleae logic analyzers over the headless automation server"
+description = "Python bindings for saleae_rs: Saleae logic analyzers over the headless automation server"
 publish = false # distributed as a Python wheel, see pyproject.toml
 
 [lib]
-# Cargo-level artifact name only (avoids a filename collision with the `saleae_automation` lib crate in this
-# workspace); the importable Python module name comes from the `#[pymodule] fn saleae_automation` in
+# Cargo-level artifact name only (avoids a filename collision with the `saleae_rs` lib crate in this
+# workspace); the importable Python module name comes from the `#[pymodule] fn saleae_rs` in
 # src/lib.rs plus `[tool.maturin] module-name` in pyproject.toml.
 name = "saleae_py"
 crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { workspace = true, features = ["extension-module", "abi3-py39"] }
-saleae_automation = { path = "../saleae_automation", version = "0.4.0" }
+saleae_rs = { path = "../saleae_rs", version = "0.4.0" }
 serde_json = { workspace = true }
 tokio = { workspace = true }

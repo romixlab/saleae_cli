@@ -25,5 +25,5 @@ install:
 
 # Bring this PC up to main
 deploy:
-    tpm repos pull saleae_cli
+    tpm repos pull saleae_rs
     just install

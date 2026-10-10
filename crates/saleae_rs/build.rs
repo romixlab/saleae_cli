@@ -6,7 +6,7 @@
 //! - `DOCS_RS`: docs.rs builds have no network, so the proto is skipped and the crate is built with
 //!   `cfg(saleae_stub_proto)`: no modules, since none of them can exist without the generated types.
 //!
-//! The download uses the system `curl` (same as `saleae_automation::server::install`): a TLS stack in the build script
+//! The download uses the system `curl` (same as `saleae_rs::server::install`): a TLS stack in the build script
 //! would bring in C or assembly code (ring, aws-lc) that the pure-Rust rule of this repo avoids. Integrity comes
 //! from the pinned SHA-256, not from TLS.
 

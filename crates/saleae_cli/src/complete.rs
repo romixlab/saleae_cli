@@ -9,7 +9,7 @@ use clap::Command;
 use clap_complete::CompleteEnv;
 use clap_complete::CompletionCandidate;
 use clap_complete::env::{Elvish, EnvCompleter, Fish, Powershell, Shells, Zsh};
-use saleae_automation::server::{self, State};
+use saleae_rs::server::{self, State};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
@@ -30,7 +30,7 @@ pub(crate) fn device_ids() -> Vec<CompletionCandidate> {
         .build()
         .ok()
         .and_then(|rt| {
-            rt.block_on(saleae_automation::device::probe_quick(
+            rt.block_on(saleae_rs::device::probe_quick(
                 &addr,
                 Duration::from_millis(500),
             ))
@@ -74,7 +74,7 @@ pub(crate) fn analyzer_ids() -> Vec<CompletionCandidate> {
 }
 
 pub(crate) fn analyzer_names() -> Vec<CompletionCandidate> {
-    saleae_automation::analyzer::BUNDLED
+    saleae_rs::analyzer::BUNDLED
         .iter()
         .map(|n| CompletionCandidate::new(*n))
         .collect()

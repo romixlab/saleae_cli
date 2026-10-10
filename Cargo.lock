@@ -1017,7 +1017,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
-name = "saleae_automation"
+name = "saleae_cli"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "clap_complete",
+ "saleae_rs",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "saleae_py"
+version = "0.4.0"
+dependencies = [
+ "pyo3",
+ "saleae_rs",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "saleae_rs"
 version = "0.4.0"
 dependencies = [
  "csv",
@@ -1033,28 +1055,6 @@ dependencies = [
  "tonic-prost",
  "tonic-prost-build",
  "zip",
-]
-
-[[package]]
-name = "saleae_cli"
-version = "0.4.0"
-dependencies = [
- "anyhow",
- "clap",
- "clap_complete",
- "saleae_automation",
- "serde_json",
- "tokio",
-]
-
-[[package]]
-name = "saleae_py"
-version = "0.4.0"
-dependencies = [
- "pyo3",
- "saleae_automation",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
