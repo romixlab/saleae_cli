@@ -18,6 +18,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = { workspace = true, features = ["extension-module", "abi3-py39"] }
-saleae_automation = { path = "../saleae_automation", version = "0.3.0" }
+saleae_automation = { path = "../saleae_automation", version = "0.4.0" }
 serde_json = { workspace = true }
 tokio = { workspace = true }

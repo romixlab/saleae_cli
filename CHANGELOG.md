@@ -6,6 +6,8 @@ every feature; IDs in parentheses refer to it.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-10
+
 ### Added
 
 - `saleae_automation` library crate (not `saleae`: that crates.io name is someone else's older, unrelated
