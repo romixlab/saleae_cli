@@ -12,6 +12,16 @@ This file is the single source of truth for what saleae_cli does, what is broken
   talking to people (`CAP-4 mso-capture`).
 - When finishing work, update the item in the same commit. Obsolete items go to *Dropped and superseded*.
 
+## Library (`LIB`)
+
+- 🧪 **LIB-1 Library-first split**: a Cargo workspace: `crates/saleae_automation` (the library: server
+  lifecycle, typed capture/analyzer/export calls and results, summaries; `saleae_automation::Error` via
+  thiserror; not `saleae`, that crates.io name is someone else's older, unrelated package), `crates/saleae_cli`
+  (the same `saleae` commands, flags, JSON and completions, on the library; CLI-6) and `crates/saleae_py`
+  (PY-1).
+  Unit tests moved with the code and pass; `crates/saleae_cli/tests/sim.rs` (decode on simulated devices,
+  `server stop`) passes against the real headless server.
+
 ## Server (`SRV`)
 
 - ✅ **SRV-1 Install**: `saleae server install` downloads Saleae's preview headless server zip for this platform
@@ -93,6 +103,21 @@ This file is the single source of truth for what saleae_cli does, what is broken
   The proto is not vendored: `build.rs` downloads Saleae's Apache-2.0 `saleae.proto` from the logic2-automation
   repo at a pinned commit (v1.0.11) with a pinned SHA-256 (system `curl`); `SALEAE_PROTO_DIR` for offline builds
   or a newer proto; `DOCS_RS` builds a stub (no network on docs.rs). `cargo package` verified.
+- 🧪 **CLI-6 Thin CLI over the library**: `crates/saleae_cli` keeps the same commands, flags, JSON output and
+  completions, now as a thin layer (clap parsing, text/JSON formatting) over `crates/saleae_automation`
+  (LIB-1); `anyhow` only here, the library's `saleae_automation::Error` everywhere else.
+
+## Python (`PY`)
+
+- 🧪 **PY-1 Python module `saleae_automation`**: `crates/saleae_py` (PyPI name `saleae-automation`; not
+  `saleae`, same name clash as LIB-1), PyO3 (abi3, Python >= 3.9) built with maturin:
+  `Session` (devices, capture, add_analyzer/remove_analyzer via a settings dict, summarize, save/load/close),
+  module functions `install()`/`stop()`, exceptions under `SaleaeError` mapped from `saleae_automation::Error`.
+  The typed
+  SPI/I2C/... shorthands the CLI has are not wrapped yet; analyzers go through the generic settings-dict path
+  (`OtherOptions`). Type stubs (`saleae.pyi`) ship in the wheel. `just test-py` builds it in a venv under /tmp
+  and runs the pytest smoke test against the simulated devices (skips with a reason when no server is
+  installed); verified passing against a real `saleae server install`.
 
 ## Agent skill (`SKILL`)
 

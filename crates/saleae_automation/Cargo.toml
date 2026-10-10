@@ -1,0 +1,31 @@
+[package]
+name = "saleae_automation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Typed Rust API for Saleae logic analyzers over the headless Logic 2 automation server (gRPC)"
+readme = "README.md"
+keywords = ["saleae", "logic-analyzer", "grpc", "embedded"]
+categories = ["hardware-support"]
+
+[dependencies]
+csv.workspace = true
+dirs.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+zip.workspace = true
+
+[build-dependencies]
+protox = "0.9"
+sha2 = "0.10"
+tonic-prost-build = { version = "0.14", default-features = false, features = ["transport"] }
+
+[dev-dependencies]

@@ -1,14 +1,15 @@
 //! The command tree (clap derive) and the command handlers; `--json` output goes through [`Out::print`].
 
-use crate::analyzers::{self, Protocol};
-use crate::capture::{self, CaptureArgs, End};
-use crate::server::{self, AnalyzerRecord, Conn, Session};
-use crate::{complete, parse, pb, summary};
-use anyhow::{Context, Result, bail};
+use crate::analyzer_args::Protocol;
+use crate::capture_args::CaptureArgs;
+use crate::{complete, parse};
+use anyhow::{Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::ArgValueCandidates;
+use saleae_automation::capture::End;
+use saleae_automation::server::Conn;
 use serde_json::{Value, json};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 const VERSION: &str = concat!(
@@ -29,7 +30,7 @@ The server keeps captures in memory, so the CLI starts it in the background on f
 Shell completion: `source <(COMPLETE=bash saleae)` (or zsh, fish).")]
 struct Cli {
     /// Automation server address.
-    #[arg(long, global = true, env = "SALEAE_ADDR", default_value = server::DEFAULT_ADDR)]
+    #[arg(long, global = true, env = "SALEAE_ADDR", default_value = saleae_automation::server::DEFAULT_ADDR)]
     addr: String,
     /// Machine-readable JSON on stdout.
     #[arg(long, global = true)]
@@ -136,7 +137,7 @@ enum ServerCmd {
     /// Download the server for this platform and unpack it into the CLI data dir.
     Install {
         /// Release build id from the Saleae forum post (part of the download URL).
-        #[arg(long, default_value = server::DEFAULT_BUILD)]
+        #[arg(long, default_value = saleae_automation::server::DEFAULT_BUILD)]
         build: String,
         /// Full download URL instead of --build.
         #[arg(long)]
@@ -239,73 +240,20 @@ pub enum Radix {
     Ascii,
 }
 
-impl Radix {
-    fn pb(self) -> pb::RadixType {
-        match self {
-            Radix::Hex => pb::RadixType::Hexadecimal,
-            Radix::Dec => pb::RadixType::Decimal,
-            Radix::Bin => pb::RadixType::Binary,
-            Radix::Ascii => pb::RadixType::Ascii,
+impl From<Radix> for saleae_automation::export::Radix {
+    fn from(r: Radix) -> Self {
+        match r {
+            Radix::Hex => saleae_automation::export::Radix::Hex,
+            Radix::Dec => saleae_automation::export::Radix::Dec,
+            Radix::Bin => saleae_automation::export::Radix::Bin,
+            Radix::Ascii => saleae_automation::export::Radix::Ascii,
         }
     }
 }
 
-/// `DeviceType` value of a Logic MSO. It is only in API 1.2 (the proto in Saleae's server zip), not in the
-/// published 1.0 proto this crate builds against, so it is matched as a number. TODO(CAP-4): use the enum.
-pub const DEVICE_TYPE_LOGIC_MSO: i32 = 7;
-
-pub fn device_name(t: i32) -> &'static str {
-    if t == DEVICE_TYPE_LOGIC_MSO {
-        return "Logic MSO";
-    }
-    match pb::DeviceType::try_from(t).unwrap_or(pb::DeviceType::Unspecified) {
-        pb::DeviceType::Logic => "Logic",
-        pb::DeviceType::Logic4 => "Logic 4",
-        pb::DeviceType::Logic8 => "Logic 8",
-        pb::DeviceType::Logic16 => "Logic 16",
-        pb::DeviceType::LogicPro8 => "Logic Pro 8",
-        pb::DeviceType::LogicPro16 => "Logic Pro 16",
-        _ => "unknown",
-    }
-}
-
-/// gRPC errors as one readable line (the server puts the useful part in the message).
-pub fn rpc_error(s: tonic::Status) -> anyhow::Error {
-    anyhow::anyhow!("server: {} ({:?})", s.message(), s.code())
-}
-
-/// Device ids and names of a server already running at `addr`, for completion; `None` when none answers quickly.
-pub async fn list_devices_quick(addr: &str) -> Option<Vec<(String, String)>> {
-    let fut = async {
-        let ep = tonic::transport::Endpoint::from_shared(format!("http://{addr}")).ok()?;
-        let mut c = pb::manager_client::ManagerClient::new(ep.connect().await.ok()?);
-        let devices = c
-            .get_devices(pb::GetDevicesRequest {
-                include_simulation_devices: true,
-            })
-            .await
-            .ok()?
-            .into_inner()
-            .devices;
-        Some(
-            devices
-                .into_iter()
-                .map(|d| {
-                    let sim = if d.is_simulation { " (simulated)" } else { "" };
-                    (d.device_id, format!("{}{sim}", device_name(d.device_type)))
-                })
-                .collect(),
-        )
-    };
-    tokio::time::timeout(Duration::from_millis(500), fut)
-        .await
-        .ok()
-        .flatten()
-}
-
-/// Absolute path for the server, which runs in its own working directory.
-fn abs(p: &Path) -> Result<String> {
-    Ok(std::path::absolute(p)?.to_string_lossy().into_owned())
+/// Prints `msg` to stderr: the lib's progress callback for a server it started or installed.
+fn progress(msg: &str) {
+    eprintln!("{msg}");
 }
 
 struct Out {
@@ -360,26 +308,16 @@ async fn run(cli: Cli) -> Result<()> {
     match cli.cmd {
         Cmd::Server(c) => server_cmd(&conn, &out, c).await,
         Cmd::Devices { real } => {
-            let mut s = conn.session().await?;
-            let devices = s
-                .client
-                .get_devices(pb::GetDevicesRequest {
-                    include_simulation_devices: !real,
-                })
-                .await
-                .map_err(rpc_error)?
-                .into_inner()
-                .devices;
+            let mut s = conn.session(Some(&progress)).await?;
+            let devices = saleae_automation::device::list(&mut s, real).await?;
             let mut text = String::new();
             let mut list = vec![];
             for d in &devices {
-                let sim = if d.is_simulation { "  simulated" } else { "" };
-                text += &format!("{:<8} {}{sim}\n", d.device_id, device_name(d.device_type));
-                list.push(json!({
-                    "id": d.device_id, "type": device_name(d.device_type), "simulated": d.is_simulation,
-                }));
+                let sim = if d.simulated { "  simulated" } else { "" };
+                text += &format!("{:<8} {}{sim}\n", d.id, d.type_name);
+                list.push(json!({ "id": d.id, "type": d.type_name, "simulated": d.simulated }));
             }
-            if devices.iter().all(|d| d.is_simulation) {
+            if devices.iter().all(|d| d.simulated) {
                 text += "(no real device: plug one in; on Linux install the udev rules, see `saleae server install`)\n";
             }
             out.print(text, json!({ "devices": list }));
@@ -393,7 +331,7 @@ async fn run(cli: Cli) -> Result<()> {
                 );
                 return Ok(());
             };
-            let state = server::State::load(&conn.addr, pid);
+            let state = saleae_automation::server::State::load(&conn.addr, pid);
             let mut text = format!("server {version} at {} (pid {pid})\n", conn.addr);
             for c in &state.captures {
                 text += &format!("capture {}  {}  {}\n", c.id, c.device, c.desc);
@@ -417,8 +355,9 @@ async fn run(cli: Cli) -> Result<()> {
             export_raw,
             close,
         } => {
-            let mut s = conn.session().await?;
-            let (rec, end) = capture::run(&mut s, &capture, &[]).await?;
+            let opts = capture.options()?;
+            let mut s = conn.session(Some(&progress)).await?;
+            let (rec, end) = saleae_automation::capture::run(&mut s, &opts, &[]).await?;
             let mut text = format!("capture {}  {}  {}", rec.id, rec.device, rec.desc);
             if end == End::TriggerTimeout {
                 text += "\ntrigger not seen within the timeout; capture stopped and kept";
@@ -426,44 +365,26 @@ async fn run(cli: Cli) -> Result<()> {
             let mut v =
                 json!({ "capture": rec.id, "device": rec.device, "desc": rec.desc, "end": end });
             if let Some(dir) = export_raw {
-                export_raw_data(&mut s, rec.id, &dir, None, None, 1, false, false).await?;
+                saleae_automation::export::raw(&mut s, rec.id, &dir, None, None, 1, false, false)
+                    .await?;
                 text += &format!("\nraw data in {}", dir.display());
                 v["raw_dir"] = json!(dir);
             }
             if let Some(file) = save {
-                save_capture(&mut s, rec.id, &file).await?;
+                saleae_automation::capture::save(&mut s, rec.id, &file).await?;
                 text += &format!("\nsaved {}", file.display());
                 v["saved"] = json!(file);
             }
             if close {
-                close_capture(&mut s, rec.id).await?;
+                saleae_automation::capture::close(&mut s, rec.id).await?;
                 text += "\nclosed";
             }
             out.print(text, v);
             Ok(())
         }
         Cmd::Load { file } => {
-            let mut s = conn.session().await?;
-            let id = s
-                .client
-                .load_capture(pb::LoadCaptureRequest {
-                    filepath: abs(&file)?,
-                })
-                .await
-                .map_err(rpc_error)?
-                .into_inner()
-                .capture_info
-                .context("no capture info")?
-                .capture_id;
-            s.state.captures.push(server::CaptureRecord {
-                id,
-                device: "file".into(),
-                desc: file.display().to_string(),
-                digital: vec![],
-                analog: vec![],
-                analyzers: vec![],
-            });
-            s.state.save()?;
+            let mut s = conn.session(Some(&progress)).await?;
+            let id = saleae_automation::capture::load(&mut s, &file).await?;
             out.print(
                 format!("capture {id}  loaded {}", file.display()),
                 json!({ "capture": id }),
@@ -471,8 +392,8 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Save { capture, file } => {
-            let mut s = conn.session().await?;
-            save_capture(&mut s, capture, &file).await?;
+            let mut s = conn.session(Some(&progress)).await?;
+            saleae_automation::capture::save(&mut s, capture, &file).await?;
             out.print(
                 format!("saved {}", file.display()),
                 json!({ "saved": file }),
@@ -480,8 +401,8 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Cmd::Close { capture } => {
-            let mut s = conn.session().await?;
-            close_capture(&mut s, capture).await?;
+            let mut s = conn.session(Some(&progress)).await?;
+            saleae_automation::capture::close(&mut s, capture).await?;
             out.print(
                 format!("closed capture {capture}"),
                 json!({ "closed": capture }),
@@ -497,52 +418,57 @@ async fn run(cli: Cli) -> Result<()> {
             keep,
             protocol,
         } => {
-            let spec = protocol.spec()?;
-            let mut s = conn.session().await?;
-            let (rec, end) = capture::run(&mut s, &capture, &spec.channels).await?;
-            let result = async {
-                let a = add_analyzer(&mut s, rec.id, &spec, None).await?;
-                let mut sum = summarize(&mut s, rec.id, a.id, spec.kind, &sargs).await?;
-                sum.header = format!(
-                    "{} on capture {} ({}, {}){}",
-                    spec.name,
-                    rec.id,
-                    rec.device,
-                    rec.desc,
-                    if end == End::TriggerTimeout {
-                        ", trigger NOT seen"
-                    } else {
-                        ""
-                    }
+            let proto = protocol.to_lib()?;
+            let spec = proto.spec()?;
+            let opts = capture.options()?;
+            let mut s = conn.session(Some(&progress)).await?;
+            let outcome = saleae_automation::decode::decode(
+                &mut s,
+                &opts,
+                &proto,
+                None,
+                sargs.limit,
+                sargs.csv.as_deref(),
+                save.as_deref(),
+                keep,
+            )
+            .await?;
+            let mut summary = outcome.summary;
+            summary.header = format!(
+                "{} on capture {} ({}, {}){}",
+                spec.name,
+                outcome.capture.id,
+                outcome.capture.device,
+                outcome.capture.desc,
+                if outcome.end == End::TriggerTimeout {
+                    ", trigger NOT seen"
+                } else {
+                    ""
+                }
+            );
+            let mut v = summary.json();
+            v["capture"] = json!(outcome.capture.id);
+            v["analyzer"] = json!(outcome.analyzer.id);
+            v["device"] = json!(outcome.capture.device);
+            v["capture_desc"] = json!(outcome.capture.desc);
+            v["end"] = json!(outcome.end);
+            v["settings"] = spec
+                .settings
+                .iter()
+                .map(|(k, val)| (k.clone(), saleae_automation::analyzer::setting_json(val)))
+                .collect::<serde_json::Map<_, _>>()
+                .into();
+            let mut text = summary.text();
+            if let Some(file) = &outcome.saved {
+                text += &format!("saved {}\n", file.display());
+                v["saved"] = json!(file);
+            }
+            if keep {
+                text += &format!(
+                    "capture {} kept open (analyzer {})\n",
+                    outcome.capture.id, outcome.analyzer.id
                 );
-                let mut v = sum.json();
-                v["capture"] = json!(rec.id);
-                v["analyzer"] = json!(a.id);
-                v["device"] = json!(rec.device);
-                v["capture_desc"] = json!(rec.desc);
-                v["end"] = json!(end);
-                v["settings"] = spec
-                    .settings
-                    .iter()
-                    .map(|(k, val)| (k.clone(), analyzers::setting_json(val)))
-                    .collect::<serde_json::Map<_, _>>()
-                    .into();
-                let mut text = sum.text();
-                if let Some(file) = &save {
-                    save_capture(&mut s, rec.id, file).await?;
-                    text += &format!("saved {}\n", file.display());
-                    v["saved"] = json!(file);
-                }
-                if keep {
-                    text += &format!("capture {} kept open (analyzer {})\n", rec.id, a.id);
-                }
-                anyhow::Ok((text, v))
             }
-            .await;
-            if !keep {
-                close_capture(&mut s, rec.id).await?;
-            }
-            let (text, v) = result?;
             out.print(text, v);
             Ok(())
         }
@@ -551,16 +477,24 @@ async fn run(cli: Cli) -> Result<()> {
             analyzer,
             out: sargs,
         } => {
-            let mut s = conn.session().await?;
+            let mut s = conn.session(Some(&progress)).await?;
             let kind = s
                 .state
                 .capture(capture)
                 .and_then(|c| c.analyzers.iter().find(|a| a.id == analyzer))
-                .map(|a| summary::kind_of(&a.name))
-                .unwrap_or(analyzers::Kind::Other);
-            let mut sum = summarize(&mut s, capture, analyzer, kind, &sargs).await?;
-            sum.header = format!("analyzer {analyzer} on capture {capture}");
-            out.print(sum.text(), sum.json());
+                .map(|a| saleae_automation::analyzer::kind_of(&a.name))
+                .unwrap_or(saleae_automation::analyzer::Kind::Other);
+            let mut summary = saleae_automation::decode::summarize_analyzer(
+                &mut s,
+                capture,
+                analyzer,
+                kind,
+                sargs.limit,
+                sargs.csv.as_deref(),
+            )
+            .await?;
+            summary.header = format!("analyzer {analyzer} on capture {capture}");
+            out.print(summary.text(), summary.json());
             Ok(())
         }
     }
@@ -571,9 +505,9 @@ async fn server_cmd(conn: &Conn, out: &Out, c: ServerCmd) -> Result<()> {
         ServerCmd::Install { build, url, zip } => {
             let url = match url {
                 Some(u) => u,
-                None => server::download_url(&build)?,
+                None => saleae_automation::server::download_url(&build)?,
             };
-            let bin = server::install(&url, zip.as_deref())?;
+            let bin = saleae_automation::server::install(&url, zip.as_deref(), Some(&progress))?;
             let mut text = format!("installed {}\n", bin.display());
             if cfg!(target_os = "linux") {
                 let rules = bin.with_file_name("99-SaleaeLogic.rules");
@@ -599,9 +533,12 @@ async fn server_cmd(conn: &Conn, out: &Out, c: ServerCmd) -> Result<()> {
             if foreground {
                 std::process::exit(conn.run_foreground()?);
             }
-            let s = conn.session().await?;
+            let s = conn.session(Some(&progress)).await?;
             out.print(
-                format!("server {} running at {} (pid {})", s.app_version, conn.addr, s.server_pid),
+                format!(
+                    "server {} running at {} (pid {})",
+                    s.app_version, conn.addr, s.server_pid
+                ),
                 json!({ "running": true, "pid": s.server_pid, "version": s.app_version, "started": true }),
             );
         }
@@ -611,7 +548,7 @@ async fn server_cmd(conn: &Conn, out: &Out, c: ServerCmd) -> Result<()> {
                 json!({ "stopped": false }),
             ),
             Some((_, pid, _)) => {
-                server::kill(pid)?;
+                saleae_automation::server::kill(pid)?;
                 // it shuts down cleanly (closes USB), which takes a moment
                 let deadline = std::time::Instant::now() + Duration::from_secs(10);
                 while conn.probe().await.is_some() {
@@ -637,7 +574,7 @@ async fn server_cmd(conn: &Conn, out: &Out, c: ServerCmd) -> Result<()> {
             ),
         },
         ServerCmd::Path => {
-            let bin = server::locate(conn.server_bin.as_deref())?;
+            let bin = saleae_automation::server::locate(conn.server_bin.as_deref())?;
             out.print(bin.display().to_string(), json!({ "path": bin }));
         }
     }
@@ -652,26 +589,16 @@ async fn analyzer_cmd(conn: &Conn, out: &Out, c: AnalyzerCmd) -> Result<()> {
             protocol,
         } => {
             let spec = protocol.spec()?;
-            let mut s = conn.session().await?;
-            let a = add_analyzer(&mut s, capture, &spec, label).await?;
+            let mut s = conn.session(Some(&progress)).await?;
+            let a = saleae_automation::analyzer::add(&mut s, capture, &spec, label).await?;
             out.print(
                 format!("analyzer {}  {} on capture {capture}", a.id, a.label),
                 json!({ "analyzer": a.id, "capture": capture, "name": a.name, "label": a.label }),
             );
         }
         AnalyzerCmd::Remove { capture, analyzer } => {
-            let mut s = conn.session().await?;
-            s.client
-                .remove_analyzer(pb::RemoveAnalyzerRequest {
-                    capture_id: capture,
-                    analyzer_id: analyzer,
-                })
-                .await
-                .map_err(rpc_error)?;
-            if let Some(c) = s.state.capture_mut(capture) {
-                c.analyzers.retain(|a| a.id != analyzer);
-            }
-            s.state.save()?;
+            let mut s = conn.session(Some(&progress)).await?;
+            saleae_automation::analyzer::remove(&mut s, capture, analyzer).await?;
             out.print(
                 format!("removed analyzer {analyzer}"),
                 json!({ "removed": analyzer }),
@@ -681,77 +608,19 @@ async fn analyzer_cmd(conn: &Conn, out: &Out, c: AnalyzerCmd) -> Result<()> {
             let text = format!(
                 "{}\n\nShorthands with typed flags: spi, i2c, serial (uart), can, lin, onewire; any other: \
                  `analyzer add other NAME --set KEY=VALUE` with the setting names Logic 2 shows.",
-                analyzers::BUNDLED.join("\n")
+                saleae_automation::analyzer::BUNDLED.join("\n")
             );
-            out.print(text, json!({ "analyzers": analyzers::BUNDLED }));
+            out.print(
+                text,
+                json!({ "analyzers": saleae_automation::analyzer::BUNDLED }),
+            );
         }
     }
     Ok(())
 }
 
-async fn add_analyzer(
-    s: &mut Session,
-    capture: u64,
-    spec: &analyzers::Spec,
-    label: Option<String>,
-) -> Result<AnalyzerRecord> {
-    let label = label.unwrap_or_else(|| spec.name.clone());
-    let id = s
-        .client
-        .add_analyzer(pb::AddAnalyzerRequest {
-            capture_id: capture,
-            analyzer_name: spec.name.clone(),
-            analyzer_label: label.clone(),
-            settings: spec.settings.clone(),
-        })
-        .await
-        .map_err(rpc_error)
-        .with_context(|| format!("add {} analyzer", spec.name))?
-        .into_inner()
-        .analyzer_id;
-    let rec = AnalyzerRecord {
-        id,
-        name: spec.name.clone(),
-        label,
-    };
-    if let Some(c) = s.state.capture_mut(capture) {
-        c.analyzers.push(rec.clone());
-        s.state.save()?;
-    }
-    Ok(rec)
-}
-
-async fn summarize(
-    s: &mut Session,
-    capture: u64,
-    analyzer: u64,
-    kind: analyzers::Kind,
-    args: &SummaryArgs,
-) -> Result<summary::Summary> {
-    let tmp = server::data_dir().join(format!("table-{capture}-{analyzer}.csv"));
-    std::fs::create_dir_all(server::data_dir())?;
-    export_table(
-        s,
-        capture,
-        &[analyzer],
-        &tmp,
-        Radix::Hex,
-        &[],
-        None,
-        &[],
-        false,
-    )
-    .await?;
-    let data = std::fs::read_to_string(&tmp).with_context(|| format!("read {}", tmp.display()))?;
-    if let Some(csv) = &args.csv {
-        std::fs::copy(&tmp, csv).with_context(|| format!("write {}", csv.display()))?;
-    }
-    let _ = std::fs::remove_file(&tmp);
-    summary::summarize(kind, &data, args.limit)
-}
-
 async fn export_cmd(conn: &Conn, out: &Out, c: ExportCmd) -> Result<()> {
-    let mut s = conn.session().await?;
+    let mut s = conn.session(Some(&progress)).await?;
     match c {
         ExportCmd::Raw {
             capture,
@@ -762,8 +631,15 @@ async fn export_cmd(conn: &Conn, out: &Out, c: ExportCmd) -> Result<()> {
             binary,
             iso,
         } => {
-            export_raw_data(
-                &mut s, capture, &dir, digital, analog, downsample, binary, iso,
+            saleae_automation::export::raw(
+                &mut s,
+                capture,
+                &dir,
+                digital.map(|c| c.0),
+                analog.map(|c| c.0),
+                downsample,
+                binary,
+                iso,
             )
             .await?;
             let files: Vec<String> = std::fs::read_dir(&dir)
@@ -799,12 +675,12 @@ async fn export_cmd(conn: &Conn, out: &Out, c: ExportCmd) -> Result<()> {
             if ids.is_empty() {
                 bail!("no analyzers: pass --analyzer ID (see `saleae status`)");
             }
-            export_table(
+            saleae_automation::export::table(
                 &mut s,
                 capture,
                 &ids,
                 &file,
-                radix,
+                radix.into(),
                 &column,
                 filter,
                 &filter_column,
@@ -818,132 +694,6 @@ async fn export_cmd(conn: &Conn, out: &Out, c: ExportCmd) -> Result<()> {
         }
     }
     Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn export_raw_data(
-    s: &mut Session,
-    capture: u64,
-    dir: &Path,
-    digital: Option<parse::Channels>,
-    analog: Option<parse::Channels>,
-    downsample: u64,
-    binary: bool,
-    iso: bool,
-) -> Result<()> {
-    std::fs::create_dir_all(dir).with_context(|| format!("create {}", dir.display()))?;
-    let rec = s.state.capture(capture);
-    let digital = digital
-        .map(|c| c.0)
-        .or_else(|| rec.map(|r| r.digital.clone()))
-        .unwrap_or_default();
-    let analog = analog
-        .map(|c| c.0)
-        .or_else(|| rec.map(|r| r.analog.clone()))
-        .unwrap_or_default();
-    if digital.is_empty() && analog.is_empty() {
-        bail!("no channels known for capture {capture}: pass --digital / --analog");
-    }
-    let channels = pb::LogicChannels {
-        digital_channels: digital,
-        analog_channels: analog,
-    };
-    let directory = abs(dir)?;
-    if binary {
-        s.client
-            .export_raw_data_binary(pb::ExportRawDataBinaryRequest {
-                capture_id: capture,
-                directory,
-                channels: Some(pb::export_raw_data_binary_request::Channels::LogicChannels(
-                    channels,
-                )),
-                analog_downsample_ratio: downsample,
-            })
-            .await
-            .map_err(rpc_error)?;
-    } else {
-        s.client
-            .export_raw_data_csv(pb::ExportRawDataCsvRequest {
-                capture_id: capture,
-                directory,
-                channels: Some(pb::export_raw_data_csv_request::Channels::LogicChannels(
-                    channels,
-                )),
-                analog_downsample_ratio: downsample,
-                iso8601_timestamp: iso,
-            })
-            .await
-            .map_err(rpc_error)?;
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn export_table(
-    s: &mut Session,
-    capture: u64,
-    analyzers: &[u64],
-    file: &Path,
-    radix: Radix,
-    columns: &[String],
-    filter: Option<String>,
-    filter_columns: &[String],
-    iso: bool,
-) -> Result<()> {
-    s.client
-        .export_data_table_csv(pb::ExportDataTableCsvRequest {
-            capture_id: capture,
-            filepath: abs(file)?,
-            analyzers: analyzers
-                .iter()
-                .map(|&id| pb::DataTableAnalyzerConfiguration {
-                    analyzer_id: id,
-                    radix_type: radix.pb() as i32,
-                })
-                .collect(),
-            iso8601_timestamp: iso,
-            export_columns: columns.to_vec(),
-            filter: filter.map(|q| pb::DataTableFilter {
-                query: q,
-                columns: filter_columns.to_vec(),
-            }),
-        })
-        .await
-        .map_err(rpc_error)
-        .context("export data table")?;
-    Ok(())
-}
-
-async fn save_capture(s: &mut Session, capture: u64, file: &Path) -> Result<()> {
-    s.client
-        .save_capture(pb::SaveCaptureRequest {
-            capture_id: capture,
-            filepath: abs(file)?,
-        })
-        .await
-        .map_err(rpc_error)
-        .context("save capture")?;
-    Ok(())
-}
-
-/// Stops (a no-op unless still running) and closes a capture.
-async fn close_capture(s: &mut Session, capture: u64) -> Result<()> {
-    s.client
-        .stop_capture(pb::StopCaptureRequest {
-            capture_id: capture,
-        })
-        .await
-        .map_err(rpc_error)
-        .context("stop capture")?;
-    s.client
-        .close_capture(pb::CloseCaptureRequest {
-            capture_id: capture,
-        })
-        .await
-        .map_err(rpc_error)
-        .context("close capture")?;
-    s.state.captures.retain(|c| c.id != capture);
-    s.state.save()
 }
 
 #[cfg(test)]

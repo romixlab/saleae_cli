@@ -1,13 +1,13 @@
 //! The headless automation server: installing it, finding it, starting it in the background and connecting.
 //!
-//! Captures live inside the server process, so the CLI keeps one server running across commands: the first
-//! command that needs it starts it detached (unless `--no-launch`), `saleae server stop` ends it. A small state
-//! file remembers the captures and analyzers this CLI created, tied to the server's process id, so later
-//! commands (and shell completion) can refer to them.
+//! Captures live inside the server process, so a long-running client keeps one server running across calls: the
+//! first [`Conn::session`] that needs it starts it detached (unless `no_launch`), [`kill`] ends it. A small state
+//! file remembers the captures and analyzers a client created, tied to the server's process id, so later calls
+//! (and the CLI's shell completion) can refer to them.
 
+use crate::error::{Error, Result};
 use crate::pb::GetAppInfoRequest;
 use crate::pb::manager_client::ManagerClient;
-use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -23,13 +23,13 @@ pub const SERVER_BIN: &str = if cfg!(windows) {
     "logic_automation_server"
 };
 
-/// Build that `saleae server install` fetches by default: the Logic MSO preview release from
+/// Build that `install` fetches by default: the Logic MSO preview release from
 /// <https://discuss.saleae.com/t/headless-logic2-automartion-support-for-logic-mso/3798> (server 2.4.45-insider.1,
 /// API 1.2.0).
 pub const DEFAULT_BUILD: &str = "407561e0";
 pub const DOWNLOAD_BASE: &str = "https://downloads.saleae.com/logic_automation_server";
 
-/// Where the CLI keeps the installed server, its log and its state.
+/// Where this crate keeps the installed server, its log and its state. `SALEAE_CLI_HOME` overrides it.
 pub fn data_dir() -> PathBuf {
     if let Ok(d) = std::env::var("SALEAE_CLI_HOME") {
         return PathBuf::from(d);
@@ -57,20 +57,24 @@ pub fn platform() -> Option<&'static str> {
 }
 
 pub fn download_url(build: &str) -> Result<String> {
-    let p = platform().context("Saleae ships no automation server for this platform")?;
+    let p = platform()
+        .ok_or_else(|| Error::invalid("Saleae ships no automation server for this platform"))?;
     Ok(format!(
         "{DOWNLOAD_BASE}/{build}/logic_automation_server-{p}.zip"
     ))
 }
 
-/// The server binary: `--server-bin`/`SALEAE_SERVER_BIN`, then the one `saleae server install` put in the data
-/// dir, then `logic_automation_server` on `PATH`.
+/// The server binary: `explicit` (e.g. `--server-bin`/`SALEAE_SERVER_BIN`), then the one [`install`] put in the
+/// data dir, then `logic_automation_server` on `PATH`.
 pub fn locate(explicit: Option<&Path>) -> Result<PathBuf> {
     if let Some(p) = explicit {
         if p.is_file() {
             return Ok(p.to_path_buf());
         }
-        bail!("server binary {} does not exist", p.display());
+        return Err(Error::not_found(format!(
+            "server binary {} does not exist",
+            p.display()
+        )));
     }
     let installed = installed_bin();
     if installed.is_file() {
@@ -84,57 +88,71 @@ pub fn locate(explicit: Option<&Path>) -> Result<PathBuf> {
             }
         }
     }
-    bail!(
-        "Saleae automation server not found: run `saleae server install`, or pass --server-bin / set \
-         SALEAE_SERVER_BIN (looked in {} and PATH)",
+    Err(Error::not_found(format!(
+        "Saleae automation server not found: install it, or pass an explicit server binary path (looked in {} \
+         and PATH)",
         installed.display()
-    )
+    )))
 }
 
-/// Downloads (with `curl`, so the CLI carries no TLS stack) or takes a local zip, and unpacks it into the data
-/// dir, replacing an earlier install. Returns the server binary.
-pub fn install(url: &str, zip_file: Option<&Path>) -> Result<PathBuf> {
+/// Downloads (with `curl`, so this crate carries no TLS stack) or takes a local zip, and unpacks it into the data
+/// dir, replacing an earlier install. Returns the server binary. `on_progress` is called with one line before the
+/// download starts.
+pub fn install(
+    url: &str,
+    zip_file: Option<&Path>,
+    on_progress: Option<&dyn Fn(&str)>,
+) -> Result<PathBuf> {
     let dir = data_dir();
-    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| crate::error::io_at(e, &dir))?;
     let zip_path = match zip_file {
         Some(z) => z.to_path_buf(),
         None => {
             let tmp = dir.join("download.zip");
-            eprintln!("downloading {url}");
+            if let Some(f) = on_progress {
+                f(&format!("downloading {url}"));
+            }
             let status = Command::new("curl")
                 .args(["-fL", "--progress-bar", "-o"])
                 .arg(&tmp)
                 .arg(url)
                 .status()
-                .context("run curl (needed to download; or pass --zip with a downloaded file)")?;
+                .map_err(|e| {
+                    Error::server(format!(
+                        "run curl (needed to download; or pass a pre-downloaded zip): {e}"
+                    ))
+                })?;
             if !status.success() {
-                bail!("download of {url} failed ({status})");
+                return Err(Error::server(format!(
+                    "download of {url} failed ({status})"
+                )));
             }
             tmp
         }
     };
     let server_dir = dir.join("server");
     if server_dir.exists() {
-        std::fs::remove_dir_all(&server_dir)
-            .with_context(|| format!("remove old install {}", server_dir.display()))?;
+        std::fs::remove_dir_all(&server_dir).map_err(|e| crate::error::io_at(e, &server_dir))?;
     }
-    let file =
-        std::fs::File::open(&zip_path).with_context(|| format!("open {}", zip_path.display()))?;
-    let mut archive = zip::ZipArchive::new(file).context("read server zip")?;
+    let file = std::fs::File::open(&zip_path).map_err(|e| crate::error::io_at(e, &zip_path))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| Error::server(format!("read server zip: {e}")))?;
     archive
         .extract(&server_dir)
-        .with_context(|| format!("unpack into {}", server_dir.display()))?;
+        .map_err(|e| Error::server(format!("unpack into {}: {e}", server_dir.display())))?;
     if zip_file.is_none() {
         let _ = std::fs::remove_file(&zip_path);
     }
     let bin = installed_bin();
     if !bin.is_file() {
-        bail!("zip did not contain automation_server/{SERVER_BIN}");
+        return Err(Error::server(format!(
+            "zip did not contain automation_server/{SERVER_BIN}"
+        )));
     }
     Ok(bin)
 }
 
-/// Remembered between CLI invocations: which server we talk to and what we created in it.
+/// Remembered between invocations: which server a client talks to and what it created in it.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct State {
     /// `launch_pid` of the server the captures below belong to.
@@ -169,10 +187,7 @@ fn state_path() -> PathBuf {
 impl State {
     /// The saved state; empty when there is none or it belongs to another server process.
     pub fn load(addr: &str, server_pid: u64) -> State {
-        let s: State = std::fs::read(state_path())
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
+        let s = Self::load_unchecked();
         if s.server_pid == server_pid && s.addr == addr {
             s
         } else {
@@ -193,8 +208,11 @@ impl State {
     }
 
     pub fn save(&self) -> Result<()> {
-        std::fs::create_dir_all(data_dir())?;
-        std::fs::write(state_path(), serde_json::to_vec_pretty(self)?).context("write state")
+        let dir = data_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| crate::error::io_at(e, &dir))?;
+        let path = state_path();
+        std::fs::write(&path, serde_json::to_vec_pretty(self)?)
+            .map_err(|e| crate::error::io_at(e, &path))
     }
 
     pub fn capture(&self, id: u64) -> Option<&CaptureRecord> {
@@ -216,12 +234,25 @@ pub struct Conn {
     pub no_usb: bool,
 }
 
-/// A connected client, with the server's process id and the CLI state for it.
+impl Default for Conn {
+    fn default() -> Self {
+        Conn {
+            addr: DEFAULT_ADDR.to_string(),
+            no_launch: false,
+            server_bin: None,
+            no_usb: false,
+        }
+    }
+}
+
+/// A connected client, with the server's process id and the state for it.
 pub struct Session {
     pub client: Client,
     pub server_pid: u64,
     pub app_version: String,
     pub state: State,
+    /// Whether this call started the server (`false`: one was already running).
+    pub started: bool,
 }
 
 async fn try_connect(addr: &str) -> Result<(Client, u64, String)> {
@@ -243,20 +274,27 @@ fn is_local(addr: &str) -> bool {
 }
 
 impl Conn {
-    /// Connects, starting a background server first when none answers on a local address.
-    pub async fn session(&self) -> Result<Session> {
-        let (client, server_pid, app_version) = match try_connect(&self.addr).await {
-            Ok(c) => c,
+    /// Connects, starting a background server first when none answers on a local address. `on_progress` gets one
+    /// line when a server is started this way.
+    pub async fn session(&self, on_progress: Option<&dyn Fn(&str)>) -> Result<Session> {
+        let (client, server_pid, app_version, started) = match try_connect(&self.addr).await {
+            Ok((c, pid, v)) => (c, pid, v, false),
             Err(e) if self.no_launch || !is_local(&self.addr) => {
-                return Err(e).with_context(|| format!("no automation server at {}", self.addr));
+                return Err(Error::server(format!(
+                    "no automation server at {}: {e}",
+                    self.addr
+                )));
             }
             Err(_) => {
                 let pid = self.start_detached()?;
-                eprintln!(
-                    "started headless Saleae server (pid {pid}) on {}; `saleae server stop` ends it",
-                    self.addr
-                );
-                self.wait_ready(Duration::from_secs(20)).await?
+                if let Some(f) = on_progress {
+                    f(&format!(
+                        "started headless Saleae server (pid {pid}) on {}",
+                        self.addr
+                    ));
+                }
+                let (c, pid, v) = self.wait_ready(Duration::from_secs(20)).await?;
+                (c, pid, v, true)
             }
         };
         let state = State::load(&self.addr, server_pid);
@@ -265,6 +303,7 @@ impl Conn {
             server_pid,
             app_version,
             state,
+            started,
         })
     }
 
@@ -278,13 +317,11 @@ impl Conn {
             match try_connect(&self.addr).await {
                 Ok(c) => return Ok(c),
                 Err(e) if start.elapsed() > timeout => {
-                    return Err(e).with_context(|| {
-                        format!(
-                            "server did not come up on {} within {timeout:?}; see {}",
-                            self.addr,
-                            log_path().display()
-                        )
-                    });
+                    return Err(Error::server(format!(
+                        "server did not come up on {} within {timeout:?}: {e}; see {}",
+                        self.addr,
+                        log_path().display()
+                    )));
                 }
                 Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
             }
@@ -297,9 +334,12 @@ impl Conn {
         let (host, port) = self
             .addr
             .rsplit_once(':')
-            .with_context(|| format!("address `{}` needs host:port", self.addr))?;
-        std::fs::create_dir_all(data_dir())?;
-        let log = std::fs::File::create(log_path()).context("create server log")?;
+            .ok_or_else(|| Error::invalid(format!("address `{}` needs host:port", self.addr)))?;
+        let dir = data_dir();
+        std::fs::create_dir_all(&dir).map_err(|e| crate::error::io_at(e, &dir))?;
+        let log_file = log_path();
+        let log =
+            std::fs::File::create(&log_file).map_err(|e| crate::error::io_at(e, &log_file))?;
         let mut cmd = Command::new(&bin);
         cmd.arg("--port")
             .arg(port)
@@ -312,7 +352,7 @@ impl Conn {
             cmd.current_dir(dir);
         }
         cmd.stdin(Stdio::null())
-            .stdout(log.try_clone()?)
+            .stdout(log.try_clone().map_err(Error::Io)?)
             .stderr(log);
         #[cfg(unix)]
         {
@@ -321,17 +361,17 @@ impl Conn {
         }
         let child = cmd
             .spawn()
-            .with_context(|| format!("start {}", bin.display()))?;
+            .map_err(|e| Error::server(format!("start {}: {e}", bin.display())))?;
         Ok(child.id())
     }
 
-    /// Foreground run: the server replaces nothing, the CLI waits for it and passes its exit code on.
+    /// Foreground run: the server replaces nothing, the caller waits for it and gets its exit code.
     pub fn run_foreground(&self) -> Result<i32> {
         let bin = locate(self.server_bin.as_deref())?;
         let (host, port) = self
             .addr
             .rsplit_once(':')
-            .context("address needs host:port")?;
+            .ok_or_else(|| Error::invalid("address needs host:port"))?;
         let mut cmd = Command::new(&bin);
         cmd.arg("--port")
             .arg(port)
@@ -342,7 +382,7 @@ impl Conn {
         }
         let status = cmd
             .status()
-            .with_context(|| format!("run {}", bin.display()))?;
+            .map_err(|e| Error::server(format!("run {}: {e}", bin.display())))?;
         Ok(status.code().unwrap_or(1))
     }
 }
@@ -357,10 +397,10 @@ pub fn kill(pid: u64) -> Result<()> {
     {
         let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).unwrap_or_default();
         if !comm.trim().starts_with("logic_automatio") {
-            bail!(
+            return Err(Error::invalid(format!(
                 "pid {pid} is `{}`, not the automation server; not killing it",
                 comm.trim()
-            );
+            )));
         }
     }
     let status = if cfg!(windows) {
@@ -370,9 +410,9 @@ pub fn kill(pid: u64) -> Result<()> {
     } else {
         Command::new("kill").arg(pid.to_string()).status()
     }
-    .context("run kill")?;
+    .map_err(|e| Error::server(format!("run kill: {e}")))?;
     if !status.success() {
-        bail!("kill {pid} failed");
+        return Err(Error::server(format!("kill {pid} failed")));
     }
     Ok(())
 }

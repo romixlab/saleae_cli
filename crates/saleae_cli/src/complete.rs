@@ -5,14 +5,15 @@
 //! state, analyzer names from the bundled list. The Bash adapter ([Bash]) is the one from wire_weaver_cli, so values
 //! with spaces ("Async Serial") complete as one word.
 
-use crate::server::{self, State};
 use clap::Command;
 use clap_complete::CompleteEnv;
 use clap_complete::CompletionCandidate;
 use clap_complete::env::{Elvish, EnvCompleter, Fish, Powershell, Shells, Zsh};
+use saleae_automation::server::{self, State};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
+use std::time::Duration;
 
 /// Answers a shell completion request and exits if there is one, otherwise does nothing.
 pub(crate) fn complete(factory: fn() -> Command) {
@@ -28,7 +29,12 @@ pub(crate) fn device_ids() -> Vec<CompletionCandidate> {
         .enable_all()
         .build()
         .ok()
-        .and_then(|rt| rt.block_on(crate::cli::list_devices_quick(&addr)));
+        .and_then(|rt| {
+            rt.block_on(saleae_automation::device::probe_quick(
+                &addr,
+                Duration::from_millis(500),
+            ))
+        });
     let devices = listed.unwrap_or_else(|| {
         vec![
             ("F4241".into(), "Logic Pro 16 (simulated)".into()),
@@ -68,7 +74,7 @@ pub(crate) fn analyzer_ids() -> Vec<CompletionCandidate> {
 }
 
 pub(crate) fn analyzer_names() -> Vec<CompletionCandidate> {
-    crate::analyzers::BUNDLED
+    saleae_automation::analyzer::BUNDLED
         .iter()
         .map(|n| CompletionCandidate::new(*n))
         .collect()

@@ -1,9 +1,9 @@
 //! Parsers for command line values: durations (`10ms`), rates (`10M`), channel lists (`0-3,6`) and analyzer
 //! setting values.
 
-use crate::pb::AnalyzerSettingValue;
-use crate::pb::analyzer_setting_value::Value;
 use anyhow::{Context, Result, bail};
+use saleae_automation::pb::AnalyzerSettingValue;
+use saleae_automation::pb::analyzer_setting_value::Value;
 
 /// Seconds from `1.5`, `250ms`, `10us`, `100ns`, `2s` or `1m` (minutes).
 pub fn duration(s: &str) -> Result<f64> {
@@ -125,39 +125,6 @@ pub fn channel_pair(s: &str) -> Result<(u32, String)> {
     ))
 }
 
-/// Human form of a duration in seconds: `1.5 s`, `250 ms`, `12.4 us`, `80 ns`.
-pub fn fmt_seconds(s: f64) -> String {
-    let a = s.abs();
-    let (v, u) = if a >= 1.0 || a == 0.0 {
-        (s, "s")
-    } else if a >= 1e-3 {
-        (s * 1e3, "ms")
-    } else if a >= 1e-6 {
-        (s * 1e6, "us")
-    } else {
-        (s * 1e9, "ns")
-    };
-    let txt = format!("{v:.3}");
-    let txt = txt.trim_end_matches('0').trim_end_matches('.');
-    format!("{txt} {u}")
-}
-
-/// Human form of a rate: `10 MS/s`, `500 kS/s`.
-pub fn fmt_rate(r: f64, unit: &str) -> String {
-    let (v, p) = if r >= 1e9 {
-        (r / 1e9, "G")
-    } else if r >= 1e6 {
-        (r / 1e6, "M")
-    } else if r >= 1e3 {
-        (r / 1e3, "k")
-    } else {
-        (r, "")
-    };
-    let txt = format!("{v:.3}");
-    let txt = txt.trim_end_matches('0').trim_end_matches('.');
-    format!("{txt} {p}{unit}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,14 +170,5 @@ mod tests {
         assert_eq!(v.value, Some(Value::StringValue("8".into())));
         let (_, v) = setting("Inverted=true").unwrap();
         assert_eq!(v.value, Some(Value::BoolValue(true)));
-    }
-
-    #[test]
-    fn formatting() {
-        assert_eq!(fmt_seconds(0.25), "250 ms");
-        assert_eq!(fmt_seconds(1.5), "1.5 s");
-        assert_eq!(fmt_seconds(12.5e-6), "12.5 us");
-        assert_eq!(fmt_rate(10e6, "S/s"), "10 MS/s");
-        assert_eq!(fmt_rate(115200.0, "bps"), "115.2 kbps");
     }
 }

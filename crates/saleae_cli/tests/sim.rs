@@ -26,9 +26,9 @@ fn decode_on_simulated_device() {
     std::fs::create_dir_all(&home).unwrap();
     // the server binary from the normal install, unless SALEAE_SERVER_BIN points elsewhere
     if std::env::var_os("SALEAE_SERVER_BIN").is_none() {
-        let installed = dirs::data_local_dir()
-            .unwrap()
-            .join("saleae_cli/server/automation_server/logic_automation_server");
+        let installed = saleae_automation::server::data_dir()
+            .join("server/automation_server")
+            .join(saleae_automation::server::SERVER_BIN);
         if !installed.is_file() {
             eprintln!("skipped: no automation server installed (run `saleae server install`)");
             return;

@@ -6,6 +6,21 @@ every feature; IDs in parentheses refer to it.
 
 ## [Unreleased]
 
+### Added
+
+- `saleae_automation` library crate (not `saleae`: that crates.io name is someone else's older, unrelated
+  package): server lifecycle, typed capture/analyzer/export calls and results, summaries, errors as an enum
+  (LIB-1).
+- `saleae_automation` Python module (`crates/saleae_py`, PyPI name `saleae-automation`,
+  `pip install ./crates/saleae_py`): `Session` (devices, capture, add_analyzer/remove_analyzer, summarize,
+  save/load/close), `install()`/`stop()`, type stubs (PY-1).
+
+### Changed
+
+- The repo is a Cargo workspace: `crates/saleae_automation` (library), `crates/saleae_cli` (the `saleae`
+  binary, same commands and output), `crates/saleae_py`; install with `cargo install --path crates/saleae_cli`
+  or `just install` (LIB-1, CLI-6).
+
 ### Docs
 
 - Skill: wire every channel as a twisted pair with its own ground, with a photo of such leads and the numbers

@@ -6,9 +6,9 @@
 //! with `mosi`, `miso`; Async Serial `data` with `data`, `error`; CAN `identifier_field`, `control_field`,
 //! `data_field`, `crc_field`, `ack_field`, `can_error`.
 
-use crate::analyzers::Kind;
-use crate::parse::fmt_seconds;
-use anyhow::{Context, Result};
+use crate::analyzer::Kind;
+use crate::error::{Error, Result};
+use crate::fmt::seconds;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
@@ -32,19 +32,6 @@ impl Summary {
         let mut v = self.json.clone();
         v["header"] = json!(self.header);
         v
-    }
-}
-
-pub fn kind_of(name: &str) -> Kind {
-    match name {
-        "SPI" => Kind::Spi {
-            mosi: true,
-            miso: true,
-        },
-        "I2C" => Kind::I2c,
-        "Async Serial" => Kind::Serial,
-        "CAN" => Kind::Can,
-        _ => Kind::Other,
     }
 }
 
@@ -102,19 +89,22 @@ fn parse_rows(data: &str) -> Result<Vec<Row>> {
     let mut rdr = csv::ReaderBuilder::new()
         .flexible(true)
         .from_reader(data.as_bytes());
-    let headers = rdr.headers().context("data table has no header")?.clone();
+    let headers = rdr
+        .headers()
+        .map_err(|e| Error::invalid(format!("data table has no header: {e}")))?
+        .clone();
     let idx = |name: &str| headers.iter().position(|h| h == name);
     let (Some(ty), Some(t)) = (idx("type"), idx("start_time")) else {
-        anyhow::bail!(
+        return Err(Error::invalid(format!(
             "unexpected data table columns: {}",
             headers.iter().collect::<Vec<_>>().join(",")
-        );
+        )));
     };
     let dur = idx("duration");
     let fixed = ["name", "type", "start_time", "duration"];
     let mut rows = vec![];
     for rec in rdr.records() {
-        let rec = rec.context("bad data table row")?;
+        let rec = rec.map_err(|e| Error::invalid(format!("bad data table row: {e}")))?;
         let mut cols = BTreeMap::new();
         for (i, h) in headers.iter().enumerate() {
             if !fixed.contains(&h)
@@ -149,7 +139,7 @@ pub fn summarize(kind: Kind, data: &str, limit: usize) -> Result<Summary> {
         .count();
     let mut lines = vec![];
     let span = match (rows.first(), rows.last()) {
-        (Some(a), Some(b)) => format!(", {} .. {}", fmt_seconds(a.t), fmt_seconds(b.t + b.dur)),
+        (Some(a), Some(b)) => format!(", {} .. {}", seconds(a.t), seconds(b.t + b.dur)),
         _ => String::new(),
     };
     let count_txt: Vec<_> = counts.iter().map(|(k, v)| format!("{k} {v}")).collect();
@@ -181,7 +171,7 @@ pub fn summarize(kind: Kind, data: &str, limit: usize) -> Result<Summary> {
     }
     if total > limit {
         lines.push(format!(
-            "... {} more (raise --limit, or --csv FILE for the full table)",
+            "... {} more (raise the limit, or export the full table)",
             total - limit
         ));
     }
@@ -194,8 +184,8 @@ pub fn summarize(kind: Kind, data: &str, limit: usize) -> Result<Summary> {
     }
     if rows.is_empty() {
         lines.push(
-            "nothing decoded: check channels, wiring, ground, logic threshold (-V), sample rate (>= 4x the bit \
-             rate) and that the bus was active during the capture"
+            "nothing decoded: check channels, wiring, ground, logic threshold, sample rate (>= 4x the bit rate) \
+             and that the bus was active during the capture"
                 .into(),
         );
     }
@@ -285,7 +275,7 @@ fn i2c(rows: &[Row]) -> Items {
                         parts.join(" | ")
                     };
                     items.push((
-                        format!("{:>10}  {text}", fmt_seconds(t0)),
+                        format!("{:>10}  {text}", seconds(t0)),
                         json!({ "t": t0, "segments": segs }),
                     ));
                 }
@@ -297,7 +287,7 @@ fn i2c(rows: &[Row]) -> Items {
         flush_seg(&mut seg, &mut parts);
         if !parts.is_empty() {
             items.push((
-                format!("{:>10}  {} (no STOP)", fmt_seconds(t0), parts.join(" | ")),
+                format!("{:>10}  {} (no STOP)", seconds(t0), parts.join(" | ")),
                 json!({ "t": t0, "segments": segs, "no_stop": true }),
             ));
         }
@@ -328,7 +318,7 @@ fn spi(rows: &[Row], show_mosi: bool, show_miso: bool) -> Items {
         if mosi.is_empty() && miso.is_empty() {
             return;
         }
-        let mut text = format!("{:>10} ", fmt_seconds(t0));
+        let mut text = format!("{:>10} ", seconds(t0));
         if show_mosi && mosi.iter().any(|m| !m.is_empty()) {
             text += &format!(" MOSI: {}", mosi.join(" "));
         }
@@ -410,7 +400,7 @@ fn serial(rows: &[Row]) -> Items {
                 0x0A => {
                     let t = t0.take().unwrap_or(r.t);
                     items.push((
-                        format!("{:>10}  {line}", fmt_seconds(t)),
+                        format!("{:>10}  {line}", seconds(t)),
                         json!({ "t": t, "text": line }),
                     ));
                     line.clear();
@@ -423,7 +413,7 @@ fn serial(rows: &[Row]) -> Items {
         if !line.is_empty() {
             let t = t0.unwrap_or(0.0);
             items.push((
-                format!("{:>10}  {line}", fmt_seconds(t)),
+                format!("{:>10}  {line}", seconds(t)),
                 json!({ "t": t, "text": line }),
             ));
         }
@@ -436,7 +426,7 @@ fn serial(rows: &[Row]) -> Items {
                 .map(|r| r.byte("data").map(hex).unwrap_or("??".into()))
                 .collect();
             items.push((
-                format!("{:>10}  {}", fmt_seconds(t), hexes.join(" ")),
+                format!("{:>10}  {}", seconds(t), hexes.join(" ")),
                 json!({ "t": t, "bytes": hexes }),
             ));
         }
@@ -450,7 +440,7 @@ fn can(rows: &[Row]) -> Items {
     let mut cur: Option<(f64, Value, String)> = None;
     let finish = |items: &mut Vec<(String, Value)>, c: Option<(f64, Value, String)>| {
         if let Some((t, v, text)) = c {
-            items.push((format!("{:>10}  {text}", fmt_seconds(t)), v));
+            items.push((format!("{:>10}  {text}", seconds(t)), v));
         }
     };
     for r in rows {
@@ -501,7 +491,7 @@ fn can(rows: &[Row]) -> Items {
             "can_error" => {
                 finish(&mut items, cur.take());
                 items.push((
-                    format!("{:>10}  ERROR", fmt_seconds(r.t)),
+                    format!("{:>10}  ERROR", seconds(r.t)),
                     json!({ "t": r.t, "error": true }),
                 ));
             }
@@ -519,7 +509,7 @@ fn generic(rows: &[Row]) -> Items {
         .map(|r| {
             let cols: Vec<String> = r.cols.iter().map(|(k, v)| format!("{k}={v}")).collect();
             (
-                format!("{:>10}  {} {}", fmt_seconds(r.t), r.ty, cols.join(" ")),
+                format!("{:>10}  {} {}", seconds(r.t), r.ty, cols.join(" ")),
                 json!({ "t": r.t, "type": r.ty, "cols": r.cols }),
             )
         })
