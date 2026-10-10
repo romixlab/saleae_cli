@@ -26,7 +26,8 @@ Linux, real devices without root: `sudo cp ~/.local/share/saleae_cli/server/auto
 ## Python
 
 ```sh
-pip install ./crates/saleae_py             # builds with maturin; needs Rust
+uv pip install ./crates/saleae_py          # in a uv venv; builds with maturin, needs Rust
+uv add ./crates/saleae_py                  # or as a dependency of a uv project
 ```
 
 ```python
